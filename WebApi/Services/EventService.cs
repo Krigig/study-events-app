@@ -37,8 +37,9 @@ public class EventService : IEventService
             Id = _nextId++,
             Title = request.Title,
             Description = request.Description,
-            StartAt = request.StartAt,
-            EndAt = request.EndAt
+            // Не-null гарантированы валидацией [ApiController] до вызова сервиса
+            StartAt = request.StartAt!.Value,
+            EndAt = request.EndAt!.Value
         };
 
         _events.Add(@event);
@@ -56,8 +57,9 @@ public class EventService : IEventService
 
         @event.Title = request.Title;
         @event.Description = request.Description;
-        @event.StartAt = request.StartAt;
-        @event.EndAt = request.EndAt;
+        // Не-null гарантированы валидацией [ApiController] до вызова сервиса
+        @event.StartAt = request.StartAt!.Value;
+        @event.EndAt = request.EndAt!.Value;
 
         return ToResponse(@event);
     }

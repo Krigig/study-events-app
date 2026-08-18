@@ -1,6 +1,42 @@
 @WebApi_HostAddress = http://localhost:5194
 
-GET {{WebApi_HostAddress}}/weatherforecast/
+// Получить список всех событий
+GET {{WebApi_HostAddress}}/events
 Accept: application/json
 
 ###
+
+// Получить событие по id
+GET {{WebApi_HostAddress}}/events/1
+Accept: application/json
+
+###
+
+// Создать событие
+POST {{WebApi_HostAddress}}/events
+Content-Type: application/json
+
+{
+  "title": "Встреча команды",
+  "description": "Еженедельный синк",
+  "startAt": "2026-09-01T10:00:00",
+  "endAt": "2026-09-01T11:00:00"
+}
+
+###
+
+// Обновить событие целиком
+PUT {{WebApi_HostAddress}}/events/1
+Content-Type: application/json
+
+{
+  "title": "Встреча команды (обновлено)",
+  "description": null,
+  "startAt": "2026-09-01T10:00:00",
+  "endAt": "2026-09-01T12:00:00"
+}
+
+###
+
+// Удалить событие
+DELETE {{WebApi_HostAddress}}/events/1

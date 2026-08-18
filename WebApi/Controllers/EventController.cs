@@ -24,6 +24,7 @@ public class EventController : ControllerBase
     /// Получить список всех событий.
     /// </summary>
     [HttpGet]
+    [ProducesResponseType(typeof(List<EventResponse>), StatusCodes.Status200OK)]
     public ActionResult<List<EventResponse>> GetAll()
     {
         return Ok(_eventService.GetAll());
@@ -33,6 +34,8 @@ public class EventController : ControllerBase
     /// Получить событие по id.
     /// </summary>
     [HttpGet("{id:int}")]
+    [ProducesResponseType(typeof(EventResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
     public ActionResult<EventResponse> GetById(int id)
     {
         var @event = _eventService.GetById(id);
@@ -43,6 +46,8 @@ public class EventController : ControllerBase
     /// Создать событие.
     /// </summary>
     [HttpPost]
+    [ProducesResponseType(typeof(EventResponse), StatusCodes.Status201Created)]
+    [ProducesResponseType(typeof(ValidationProblemDetails), StatusCodes.Status400BadRequest)]
     public ActionResult<EventResponse> Create([FromBody] EventRequest request)
     {
         var created = _eventService.Create(request);
@@ -53,6 +58,9 @@ public class EventController : ControllerBase
     /// Обновить событие целиком.
     /// </summary>
     [HttpPut("{id:int}")]
+    [ProducesResponseType(typeof(EventResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ValidationProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
     public ActionResult<EventResponse> Update(int id, [FromBody] EventRequest request)
     {
         var updated = _eventService.Update(id, request);
@@ -63,6 +71,8 @@ public class EventController : ControllerBase
     /// Удалить событие.
     /// </summary>
     [HttpDelete("{id:int}")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
     public IActionResult Delete(int id)
     {
         return _eventService.Delete(id) ? NoContent() : NotFound();

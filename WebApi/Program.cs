@@ -1,3 +1,4 @@
+using System.Reflection;
 using WebApi.Interfaces;
 using WebApi.Services;
 
@@ -11,15 +12,23 @@ builder.Services.AddProblemDetails();
 // Singleton — данные хранятся в памяти приложения.
 builder.Services.AddSingleton<IEventService, EventService>();
 
-// Swagger
+// Swagger: XML-комментарии из сборки попадают в описания эндпоинтов и схем
 builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen();
+builder.Services.AddSwaggerGen(options =>
+{
+    var xmlFile = $"{Assembly.GetExecutingAssembly().GetName().Name}.xml";
+    var xmlPath = Path.Combine(AppContext.BaseDirectory, xmlFile);
+    options.IncludeXmlComments(xmlPath);
+});
 
 var app = builder.Build();
 
-// Swagger UI доступен на /swagger
-app.UseSwagger();
-app.UseSwaggerUI();
+// Swagger UI доступен на /swagger только в окружении разработки
+if (app.Environment.IsDevelopment())
+{
+    app.UseSwagger();
+    app.UseSwaggerUI();
+}
 
 app.UseStatusCodePages(); // Единый формат ошибок (ProblemDetails) для пустых 4xx-ответов
 app.UseHttpsRedirection();
