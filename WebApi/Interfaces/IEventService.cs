@@ -10,7 +10,7 @@ public interface IEventService
     /// <summary>
     /// Возвращает все события.
     /// </summary>
-    List<EventResponse> GetAll();
+    List<EventResponse> GetAll(string? title, DateTime? from, DateTime? to);
 
     /// <summary>
     /// Возвращает событие по id или null, если оно не найдено.

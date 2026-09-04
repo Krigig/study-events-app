@@ -16,10 +16,31 @@ public class EventService : IEventService
     // Счётчик для генерации идентификаторов
     private int _nextId = 1;
 
-    // Метод получения всех событий
-    public List<EventResponse> GetAll()
+    // Метод получения всех событий с опциональной фильтрацией.
+    // Фильтры комбинируются (логическое И), применяются только если переданы.
+    public List<EventResponse> GetAll(string? title, DateTime? from, DateTime? to)
     {
-        return _events.Select(ToResponse).ToList();
+        IEnumerable<Event> query = _events;
+
+        // Частичное совпадение, регистронезависимо
+        if (title is not null)
+        {
+            query = query.Where(e => e.Title.Contains(title, StringComparison.OrdinalIgnoreCase));
+        }
+
+        // События, начинающиеся не раньше указанной даты
+        if (from.HasValue)
+        {
+            query = query.Where(e => e.StartAt >= from.Value);
+        }
+
+        // События, заканчивающиеся не позже указанной даты
+        if (to.HasValue)
+        {
+            query = query.Where(e => e.EndAt <= to.Value);
+        }
+
+        return query.Select(ToResponse).ToList();
     }
 
     // Метод получения события по id

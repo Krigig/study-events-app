@@ -22,12 +22,20 @@ public class EventController : ControllerBase
 
     /// <summary>
     /// Получить список всех событий.
+    /// Поддерживает опциональную фильтрацию: по названию (частичное совпадение,
+    /// без учёта регистра), по дате начала (не раньше) и дате окончания (не позже).
     /// </summary>
+    /// <param name="title">Поиск по названию (регистронезависимый, частичное совпадение).</param>
+    /// <param name="from">События, начинающиеся не раньше этой даты.</param>
+    /// <param name="to">События, заканчивающиеся не позже этой даты.</param>
     [HttpGet]
     [ProducesResponseType(typeof(List<EventResponse>), StatusCodes.Status200OK)]
-    public ActionResult<List<EventResponse>> GetAll()
+    public ActionResult<List<EventResponse>> GetAll(
+        [FromQuery] string? title,
+        [FromQuery] DateTime? from,
+        [FromQuery] DateTime? to)
     {
-        return Ok(_eventService.GetAll());
+        return Ok(_eventService.GetAll(title, from, to));
     }
 
     /// <summary>
