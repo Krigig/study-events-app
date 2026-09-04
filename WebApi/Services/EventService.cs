@@ -16,9 +16,11 @@ public class EventService : IEventService
     // Счётчик для генерации идентификаторов
     private int _nextId = 1;
 
-    // Метод получения всех событий с опциональной фильтрацией.
+    // Метод получения событий с опциональной фильтрацией и пагинацией.
     // Фильтры комбинируются (логическое И), применяются только если переданы.
-    public List<EventResponse> GetAll(string? title, DateTime? from, DateTime? to)
+    // Пагинация применяется после фильтрации.
+    public PaginatedResult<EventResponse> GetAll(
+        string? title, DateTime? from, DateTime? to, int page = 1, int pageSize = 10)
     {
         IEnumerable<Event> query = _events;
 
@@ -40,7 +42,24 @@ public class EventService : IEventService
             query = query.Where(e => e.EndAt <= to.Value);
         }
 
-        return query.Select(ToResponse).ToList();
+        // Общее количество берём до Skip/Take — с учётом фильтров
+        var totalItems = query.Count();
+        var totalPages = (int)Math.Ceiling(totalItems / (double)pageSize);
+
+        var items = query
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .Select(ToResponse)
+            .ToList();
+
+        return new PaginatedResult<EventResponse>
+        {
+            Items = items,
+            Page = page,
+            PageSize = pageSize,
+            TotalItems = totalItems,
+            TotalPages = totalPages
+        };
     }
 
     // Метод получения события по id

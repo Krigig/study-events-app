@@ -8,9 +8,9 @@ namespace WebApi.Interfaces;
 public interface IEventService
 {
     /// <summary>
-    /// Возвращает все события.
+    /// Возвращает события с опциональной фильтрацией и пагинацией.
     /// </summary>
-    List<EventResponse> GetAll(string? title, DateTime? from, DateTime? to);
+    PaginatedResult<EventResponse> GetAll(string? title, DateTime? from, DateTime? to, int page = 1, int pageSize = 10);
 
     /// <summary>
     /// Возвращает событие по id или null, если оно не найдено.

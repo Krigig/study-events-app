@@ -21,21 +21,36 @@ public class EventController : ControllerBase
     }
 
     /// <summary>
-    /// Получить список всех событий.
+    /// Получить постраничный список событий.
     /// Поддерживает опциональную фильтрацию: по названию (частичное совпадение,
     /// без учёта регистра), по дате начала (не раньше) и дате окончания (не позже).
     /// </summary>
     /// <param name="title">Поиск по названию (регистронезависимый, частичное совпадение).</param>
     /// <param name="from">События, начинающиеся не раньше этой даты.</param>
     /// <param name="to">События, заканчивающиеся не позже этой даты.</param>
+    /// <param name="page">Номер страницы (по умолчанию 1).</param>
+    /// <param name="pageSize">Количество элементов на странице (по умолчанию 10).</param>
     [HttpGet]
-    [ProducesResponseType(typeof(List<EventResponse>), StatusCodes.Status200OK)]
-    public ActionResult<List<EventResponse>> GetAll(
+    [ProducesResponseType(typeof(PaginatedResult<EventResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    public ActionResult<PaginatedResult<EventResponse>> GetAll(
         [FromQuery] string? title,
         [FromQuery] DateTime? from,
-        [FromQuery] DateTime? to)
+        [FromQuery] DateTime? to,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 10)
     {
-        return Ok(_eventService.GetAll(title, from, to));
+        if (page < 1 || pageSize < 1 || pageSize > 100)
+        {
+            return BadRequest(new ProblemDetails
+            {
+                Status = StatusCodes.Status400BadRequest,
+                Title = "Bad Request",
+                Detail = "Параметры пагинации некорректны: page должен быть >= 1, pageSize — от 1 до 100."
+            });
+        }
+
+        return Ok(_eventService.GetAll(title, from, to, page, pageSize));
     }
 
     /// <summary>
