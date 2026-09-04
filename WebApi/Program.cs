@@ -1,5 +1,6 @@
 using System.Reflection;
 using WebApi.Interfaces;
+using WebApi.Middleware;
 using WebApi.Services;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -29,6 +30,10 @@ if (app.Environment.IsDevelopment())
     app.UseSwagger();
     app.UseSwaggerUI();
 }
+
+// Глобальный обработчик исключений первым в pipeline — перехватывает
+// необработанные исключения всех последующих компонентов
+app.UseMiddleware<GlobalExceptionHandlingMiddleware>();
 
 app.UseStatusCodePages(); // Единый формат ошибок (ProblemDetails) для пустых 4xx-ответов
 app.UseHttpsRedirection();
