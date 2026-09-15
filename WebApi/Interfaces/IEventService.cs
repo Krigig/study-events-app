@@ -13,9 +13,9 @@ public interface IEventService
     PaginatedResult<EventResponse> GetAll(string? title, DateTime? from, DateTime? to, int page = 1, int pageSize = 10);
 
     /// <summary>
-    /// Возвращает событие по id или null, если оно не найдено.
+    /// Возвращает событие по id. Бросает <see cref="Exceptions.NotFoundException"/>, если оно не найдено.
     /// </summary>
-    EventResponse? GetById(int id);
+    EventResponse GetById(int id);
 
     /// <summary>
     /// Создаёт событие и возвращает его с присвоенным id.
@@ -23,12 +23,12 @@ public interface IEventService
     EventResponse Create(EventRequest request);
 
     /// <summary>
-    /// Полностью обновляет событие по id. Возвращает null, если оно не найдено.
+    /// Полностью обновляет событие по id. Бросает <see cref="Exceptions.NotFoundException"/>, если оно не найдено.
     /// </summary>
-    EventResponse? Update(int id, EventRequest request);
+    EventResponse Update(int id, EventRequest request);
 
     /// <summary>
-    /// Удаляет событие по id. Возвращает false, если оно не найдено.
+    /// Удаляет событие по id. Бросает <see cref="Exceptions.NotFoundException"/>, если оно не найдено.
     /// </summary>
-    bool Delete(int id);
+    void Delete(int id);
 }

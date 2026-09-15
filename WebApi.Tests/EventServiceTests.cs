@@ -1,3 +1,4 @@
+using WebApi.Exceptions;
 using WebApi.Interfaces;
 using WebApi.Models;
 using WebApi.Services;
@@ -114,11 +115,10 @@ public class EventServiceTests
         var created = service.Create(CreateRequest("Event 1"));
 
         //Act
-        var result = service.Delete(created.Id);
+        service.Delete(created.Id);
 
         //Assert
-        Assert.True(result);
-        Assert.Null(service.GetById(created.Id));
+        Assert.Throws<NotFoundException>(() => service.GetById(created.Id));
     }
 
     // Тест проверяет, что фильтрация по названию — частичное совпадение без учёта регистра
@@ -253,9 +253,27 @@ public class EventServiceTests
         Assert.Equal("dotnet workshop", result.Items[0].Title);
     }
 
-    // Тест проверяет, что GetById с несуществующим id возвращает null
+    // Тест проверяет, что пустой или пробельный title игнорируется — как и отсутствие параметра
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void GetAll_EmptyTitle_ShouldBeIgnored(string title)
+    {
+        //Arrange
+        IEventService service = new EventService();
+        service.Create(CreateRequest("Event 1"));
+        service.Create(CreateRequest("Event 2"));
+
+        //Act
+        var result = service.GetAll(title, null, null);
+
+        //Assert
+        Assert.Equal(2, result.TotalItems);
+    }
+
+    // Тест проверяет, что GetById с несуществующим id бросает NotFoundException
     [Fact]
-    public void GetById_WithNonExistentId_ShouldReturnNull()
+    public void GetById_WithNonExistentId_ShouldThrowNotFound()
     {
         //Arrange
         IEventService service = new EventService();
@@ -263,40 +281,35 @@ public class EventServiceTests
         var nonExistentId = 999;
 
         //Act
-        var result = service.GetById(nonExistentId);
-
         //Assert
-        Assert.Null(result);
+        var ex = Assert.Throws<NotFoundException>(() => service.GetById(nonExistentId));
+        Assert.Contains("999", ex.Message);
     }
 
-    // Тест проверяет, что Update с несуществующим id возвращает null и не создаёт новое событие
+    // Тест проверяет, что Update с несуществующим id бросает NotFoundException и не создаёт новое событие
     [Fact]
-    public void Update_WithNonExistentId_ShouldReturnNull()
+    public void Update_WithNonExistentId_ShouldThrowNotFound()
     {
         //Arrange
         IEventService service = new EventService();
         service.Create(CreateRequest("Event 1"));
 
         //Act
-        var result = service.Update(999, CreateRequest("New Title"));
-
         //Assert
-        Assert.Null(result);
+        Assert.Throws<NotFoundException>(() => service.Update(999, CreateRequest("New Title")));
         Assert.Single(service.GetAll(null, null, null).Items);
     }
 
-    // Тест проверяет, что Delete с несуществующим id возвращает false
+    // Тест проверяет, что Delete с несуществующим id бросает NotFoundException
     [Fact]
-    public void Delete_WithNonExistentId_ShouldReturnFalse()
+    public void Delete_WithNonExistentId_ShouldThrowNotFound()
     {
         //Arrange
         IEventService service = new EventService();
         service.Create(CreateRequest("Event 1"));
 
         //Act
-        var result = service.Delete(999);
-
         //Assert
-        Assert.False(result);
+        Assert.Throws<NotFoundException>(() => service.Delete(999));
     }
 }

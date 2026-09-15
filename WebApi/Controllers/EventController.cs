@@ -61,8 +61,8 @@ public class EventController : ControllerBase
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
     public ActionResult<EventResponse> GetById(int id)
     {
-        var @event = _eventService.GetById(id);
-        return @event is null ? NotFound() : Ok(@event);
+        // 404 формируется middleware из NotFoundException, брошенного сервисом
+        return Ok(_eventService.GetById(id));
     }
 
     /// <summary>
@@ -86,8 +86,8 @@ public class EventController : ControllerBase
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
     public ActionResult<EventResponse> Update(int id, [FromBody] EventRequest request)
     {
-        var updated = _eventService.Update(id, request);
-        return updated is null ? NotFound() : Ok(updated);
+        // 404 формируется middleware из NotFoundException, брошенного сервисом
+        return Ok(_eventService.Update(id, request));
     }
 
     /// <summary>
@@ -98,6 +98,8 @@ public class EventController : ControllerBase
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
     public IActionResult Delete(int id)
     {
-        return _eventService.Delete(id) ? NoContent() : NotFound();
+        // 404 формируется middleware из NotFoundException, брошенного сервисом
+        _eventService.Delete(id);
+        return NoContent();
     }
 }

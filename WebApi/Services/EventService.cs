@@ -1,3 +1,4 @@
+using WebApi.Exceptions;
 using WebApi.Interfaces;
 using WebApi.Models;
 
@@ -24,8 +25,9 @@ public class EventService : IEventService
     {
         IEnumerable<Event> query = _events;
 
-        // Частичное совпадение, регистронезависимо
-        if (title is not null)
+        // Частичное совпадение, регистронезависимо.
+        // Пустая строка или пробелы игнорируются — как и отсутствие параметра.
+        if (!string.IsNullOrWhiteSpace(title))
         {
             query = query.Where(e => e.Title.Contains(title, StringComparison.OrdinalIgnoreCase));
         }
@@ -62,11 +64,13 @@ public class EventService : IEventService
         };
     }
 
-    // Метод получения события по id
-    public EventResponse? GetById(int id)
+    // Метод получения события по id; бросает NotFoundException, если события нет
+    public EventResponse GetById(int id)
     {
         var @event = _events.FirstOrDefault(e => e.Id == id);
-        return @event is null ? null : ToResponse(@event);
+        return @event is null
+            ? throw new NotFoundException($"Событие с id = {id} не найдено.")
+            : ToResponse(@event);
     }
 
     // Метод создания события
@@ -86,13 +90,13 @@ public class EventService : IEventService
         return ToResponse(@event);
     }
 
-    // Метод полного обновления события по id
-    public EventResponse? Update(int id, EventRequest request)
+    // Метод полного обновления события по id; бросает NotFoundException, если события нет
+    public EventResponse Update(int id, EventRequest request)
     {
         var @event = _events.FirstOrDefault(e => e.Id == id);
         if (@event is null)
         {
-            return null;
+            throw new NotFoundException($"Событие с id = {id} не найдено.");
         }
 
         @event.Title = request.Title;
@@ -104,17 +108,16 @@ public class EventService : IEventService
         return ToResponse(@event);
     }
 
-    // Метод удаления события по id
-    public bool Delete(int id)
+    // Метод удаления события по id; бросает NotFoundException, если события нет
+    public void Delete(int id)
     {
         var eventToDelete = _events.FirstOrDefault(e => e.Id == id);
         if (eventToDelete is null)
         {
-            return false;
+            throw new NotFoundException($"Событие с id = {id} не найдено.");
         }
 
         _events.Remove(eventToDelete);
-        return true;
     }
 
     // Маппинг доменной модели в DTO ответа
