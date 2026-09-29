@@ -1,3 +1,4 @@
+using WebApi.Exceptions;
 using WebApi.Interfaces;
 using WebApi.Models;
 
@@ -16,17 +17,60 @@ public class EventService : IEventService
     // Счётчик для генерации идентификаторов
     private int _nextId = 1;
 
-    // Метод получения всех событий
-    public List<EventResponse> GetAll()
+    // Метод получения событий с опциональной фильтрацией и пагинацией.
+    // Фильтры комбинируются (логическое И), применяются только если переданы.
+    // Пагинация применяется после фильтрации.
+    public PaginatedResult<EventResponse> GetAll(
+        string? title, DateTime? from, DateTime? to, int page = 1, int pageSize = 10)
     {
-        return _events.Select(ToResponse).ToList();
+        IEnumerable<Event> query = _events;
+
+        // Частичное совпадение, регистронезависимо.
+        // Пустая строка или пробелы игнорируются — как и отсутствие параметра.
+        if (!string.IsNullOrWhiteSpace(title))
+        {
+            query = query.Where(e => e.Title.Contains(title, StringComparison.OrdinalIgnoreCase));
+        }
+
+        // События, начинающиеся не раньше указанной даты
+        if (from.HasValue)
+        {
+            query = query.Where(e => e.StartAt >= from.Value);
+        }
+
+        // События, заканчивающиеся не позже указанной даты
+        if (to.HasValue)
+        {
+            query = query.Where(e => e.EndAt <= to.Value);
+        }
+
+        // Общее количество берём до Skip/Take — с учётом фильтров
+        var totalItems = query.Count();
+        var totalPages = (int)Math.Ceiling(totalItems / (double)pageSize);
+
+        var items = query
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .Select(ToResponse)
+            .ToList();
+
+        return new PaginatedResult<EventResponse>
+        {
+            Items = items,
+            Page = page,
+            PageSize = pageSize,
+            TotalItems = totalItems,
+            TotalPages = totalPages
+        };
     }
 
-    // Метод получения события по id
-    public EventResponse? GetById(int id)
+    // Метод получения события по id; бросает NotFoundException, если события нет
+    public EventResponse GetById(int id)
     {
         var @event = _events.FirstOrDefault(e => e.Id == id);
-        return @event is null ? null : ToResponse(@event);
+        return @event is null
+            ? throw new NotFoundException($"Событие с id = {id} не найдено.")
+            : ToResponse(@event);
     }
 
     // Метод создания события
@@ -46,13 +90,13 @@ public class EventService : IEventService
         return ToResponse(@event);
     }
 
-    // Метод полного обновления события по id
-    public EventResponse? Update(int id, EventRequest request)
+    // Метод полного обновления события по id; бросает NotFoundException, если события нет
+    public EventResponse Update(int id, EventRequest request)
     {
         var @event = _events.FirstOrDefault(e => e.Id == id);
         if (@event is null)
         {
-            return null;
+            throw new NotFoundException($"Событие с id = {id} не найдено.");
         }
 
         @event.Title = request.Title;
@@ -64,17 +108,16 @@ public class EventService : IEventService
         return ToResponse(@event);
     }
 
-    // Метод удаления события по id
-    public bool Delete(int id)
+    // Метод удаления события по id; бросает NotFoundException, если события нет
+    public void Delete(int id)
     {
         var eventToDelete = _events.FirstOrDefault(e => e.Id == id);
         if (eventToDelete is null)
         {
-            return false;
+            throw new NotFoundException($"Событие с id = {id} не найдено.");
         }
 
         _events.Remove(eventToDelete);
-        return true;
     }
 
     // Маппинг доменной модели в DTO ответа
