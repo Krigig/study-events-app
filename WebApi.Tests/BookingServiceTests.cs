@@ -42,6 +42,32 @@ public class BookingServiceTests
         Assert.InRange(booking.CreatedAt, DateTime.UtcNow.AddMinutes(-1), DateTime.UtcNow.AddMinutes(1));
     }
 
+    // Тест проверяет, что несколько броней одного события получают разные id
+    [Fact]
+    public async Task CreateBookingAsync_MultipleBookingsForSameEvent_ShouldHaveUniqueIds()
+    {
+        // Arrange
+        var (service, eventService) = CreateServices();
+        var eventId = eventService.GetAll(null, null, null).Items[0].Id;
+
+        // Act
+        var bookings = new[]
+        {
+            await service.CreateBookingAsync(eventId),
+            await service.CreateBookingAsync(eventId),
+            await service.CreateBookingAsync(eventId)
+        };
+
+        // Assert
+        Assert.Equal(bookings.Length, bookings.Select(booking => booking.Id).Distinct().Count());
+        Assert.All(bookings, booking =>
+        {
+            Assert.NotEqual(Guid.Empty, booking.Id);
+            Assert.Equal(eventId, booking.EventId);
+            Assert.Equal(BookingStatus.Pending, booking.Status);
+        });
+    }
+
     // Тест проверяет, что бронирование несуществующего события бросает NotFoundException
     [Fact]
     public async Task CreateBookingAsync_WithNonExistentEvent_ShouldThrowNotFound()
@@ -52,6 +78,20 @@ public class BookingServiceTests
         //Act
         //Assert
         await Assert.ThrowsAsync<NotFoundException>(() => service.CreateBookingAsync(Guid.NewGuid()));
+    }
+
+    // Тест проверяет, что для удалённого события нельзя создать бронь
+    [Fact]
+    public async Task CreateBookingAsync_WithDeletedEvent_ShouldThrowNotFound()
+    {
+        // Arrange
+        var (service, eventService) = CreateServices();
+        var eventId = eventService.GetAll(null, null, null).Items[0].Id;
+        eventService.Delete(eventId);
+
+        // Act
+        // Assert
+        await Assert.ThrowsAsync<NotFoundException>(() => service.CreateBookingAsync(eventId));
     }
 
     // Тест проверяет, что GetBookingByIdAsync возвращает созданную бронь
@@ -70,6 +110,8 @@ public class BookingServiceTests
         Assert.NotNull(result);
         Assert.Equal(created.Id, result.Id);
         Assert.Equal(eventId, result.EventId);
+        Assert.Equal(created.Status, result.Status);
+        Assert.Equal(created.CreatedAt, result.CreatedAt);
     }
 
     // Тест проверяет, что GetBookingByIdAsync с несуществующим id бросает NotFoundException
@@ -82,5 +124,23 @@ public class BookingServiceTests
         //Act
         //Assert
         await Assert.ThrowsAsync<NotFoundException>(() => service.GetBookingByIdAsync(Guid.NewGuid()));
+    }
+
+    // Тест проверяет, что получение брони отражает смену статуса после подтверждения
+    [Fact]
+    public async Task GetBookingByIdAsync_AfterConfirm_ShouldReturnConfirmedBooking()
+    {
+        // Arrange
+        var (service, eventService) = CreateServices();
+        var eventId = eventService.GetAll(null, null, null).Items[0].Id;
+        var created = await service.CreateBookingAsync(eventId);
+
+        // Act
+        await service.ConfirmBookingAsync(created.Id);
+        var result = await service.GetBookingByIdAsync(created.Id);
+
+        // Assert
+        Assert.Equal(BookingStatus.Confirmed, result.Status);
+        Assert.InRange(result.ProcessedAt, DateTime.UtcNow.AddMinutes(-1), DateTime.UtcNow.AddMinutes(1));
     }
 }
