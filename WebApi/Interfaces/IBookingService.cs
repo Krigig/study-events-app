@@ -16,4 +16,14 @@ public interface IBookingService
     /// Возвращает бронь по идентификатору. Бросает <see cref="Exceptions.NotFoundException"/>, если бронь не найдена.
     /// </summary>
     Task<BookingResponse> GetBookingByIdAsync(Guid bookingId);
+
+    /// <summary>
+    /// Возвращает снимок всех броней, ожидающих обработки.
+    /// </summary>
+    Task<IReadOnlyCollection<BookingResponse>> GetPendingBookingsAsync();
+
+    /// <summary>
+    /// Подтверждает бронь и фиксирует время её обработки.
+    /// </summary>
+    Task ConfirmBookingAsync(Guid bookingId);
 }

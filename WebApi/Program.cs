@@ -13,6 +13,7 @@ builder.Services.AddProblemDetails();
 // Singleton — данные хранятся в памяти приложения.
 builder.Services.AddSingleton<IEventService, EventService>();
 builder.Services.AddSingleton<IBookingService, BookingService>();
+builder.Services.AddHostedService<BookingProcessingBackgroundService>();
 
 // Swagger: XML-комментарии из сборки попадают в описания эндпоинтов и схем
 builder.Services.AddEndpointsApiExplorer();

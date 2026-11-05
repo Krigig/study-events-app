@@ -50,6 +50,35 @@ public class BookingService : IBookingService
         return Task.FromResult(ToResponse(booking));
     }
 
+    public Task<IReadOnlyCollection<BookingResponse>> GetPendingBookingsAsync()
+    {
+        IReadOnlyCollection<BookingResponse> pendingBookings = _bookings
+            .Where(booking => booking.BookingStatus == BookingStatus.Pending)
+            .Select(ToResponse)
+            .ToArray();
+
+        return Task.FromResult(pendingBookings);
+    }
+
+    public Task ConfirmBookingAsync(Guid bookingId)
+    {
+        var booking = _bookings.FirstOrDefault(b => b.Id == bookingId);
+        if (booking is null)
+        {
+            throw new NotFoundException($"Бронь с id = {bookingId} не найдена.");
+        }
+
+        if (booking.BookingStatus != BookingStatus.Pending)
+        {
+            return Task.CompletedTask;
+        }
+
+        booking.BookingStatus = BookingStatus.Confirmed;
+        booking.ProcessedAt = DateTime.UtcNow;
+
+        return Task.CompletedTask;
+    }
+
     // Маппинг доменной модели в DTO ответа
     private static BookingResponse ToResponse(Booking booking) => new()
     {
