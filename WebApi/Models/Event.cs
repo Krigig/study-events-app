@@ -8,7 +8,7 @@ public class Event
     /// <summary>
     /// Идентификатор события. Генерируется на сервере.
     /// </summary>
-    public int Id { get; set; }
+    public Guid Id { get; set; }
 
     /// <summary>
     /// Название события.

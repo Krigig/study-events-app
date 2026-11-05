@@ -8,12 +8,12 @@ namespace WebApi.Interfaces;
 public interface IBookingService
 {
     /// <summary>
-    /// Создаёт бронь для указанного события.
+    /// Создаёт бронь для указанного события. Бросает <see cref="Exceptions.NotFoundException"/>, если событие не найдено.
     /// </summary>
-    Task<Booking> CreateBookingAsync(Guid eventId);
+    Task<BookingResponse> CreateBookingAsync(Guid eventId);
 
     /// <summary>
     /// Возвращает бронь по идентификатору. Бросает <see cref="Exceptions.NotFoundException"/>, если бронь не найдена.
     /// </summary>
-    Task<Booking> GetBookingByIdAsync(Guid bookingId);
+    Task<BookingResponse> GetBookingByIdAsync(Guid bookingId);
 }

@@ -14,9 +14,6 @@ public class EventService : IEventService
     // Коллекция событий в памяти приложения
     private readonly List<Event> _events = [];
 
-    // Счётчик для генерации идентификаторов
-    private int _nextId = 1;
-
     // Метод получения событий с опциональной фильтрацией и пагинацией.
     // Фильтры комбинируются (логическое И), применяются только если переданы.
     // Пагинация применяется после фильтрации.
@@ -65,7 +62,7 @@ public class EventService : IEventService
     }
 
     // Метод получения события по id; бросает NotFoundException, если события нет
-    public EventResponse GetById(int id)
+    public EventResponse GetById(Guid id)
     {
         var @event = _events.FirstOrDefault(e => e.Id == id);
         return @event is null
@@ -78,7 +75,7 @@ public class EventService : IEventService
     {
         var @event = new Event
         {
-            Id = _nextId++,
+            Id = Guid.NewGuid(),
             Title = request.Title,
             Description = request.Description,
             // Не-null гарантированы валидацией [ApiController] до вызова сервиса
@@ -91,7 +88,7 @@ public class EventService : IEventService
     }
 
     // Метод полного обновления события по id; бросает NotFoundException, если события нет
-    public EventResponse Update(int id, EventRequest request)
+    public EventResponse Update(Guid id, EventRequest request)
     {
         var @event = _events.FirstOrDefault(e => e.Id == id);
         if (@event is null)
@@ -109,7 +106,7 @@ public class EventService : IEventService
     }
 
     // Метод удаления события по id; бросает NotFoundException, если события нет
-    public void Delete(int id)
+    public void Delete(Guid id)
     {
         var eventToDelete = _events.FirstOrDefault(e => e.Id == id);
         if (eventToDelete is null)

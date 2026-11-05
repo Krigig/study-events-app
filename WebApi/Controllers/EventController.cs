@@ -56,10 +56,10 @@ public class EventController : ControllerBase
     /// <summary>
     /// Получить событие по id.
     /// </summary>
-    [HttpGet("{id:int}")]
+    [HttpGet("{id:guid}")]
     [ProducesResponseType(typeof(EventResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
-    public ActionResult<EventResponse> GetById(int id)
+    public ActionResult<EventResponse> GetById(Guid id)
     {
         // 404 формируется middleware из NotFoundException, брошенного сервисом
         return Ok(_eventService.GetById(id));
@@ -80,11 +80,11 @@ public class EventController : ControllerBase
     /// <summary>
     /// Обновить событие целиком.
     /// </summary>
-    [HttpPut("{id:int}")]
+    [HttpPut("{id:guid}")]
     [ProducesResponseType(typeof(EventResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ValidationProblemDetails), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
-    public ActionResult<EventResponse> Update(int id, [FromBody] EventRequest request)
+    public ActionResult<EventResponse> Update(Guid id, [FromBody] EventRequest request)
     {
         // 404 формируется middleware из NotFoundException, брошенного сервисом
         return Ok(_eventService.Update(id, request));
@@ -93,10 +93,10 @@ public class EventController : ControllerBase
     /// <summary>
     /// Удалить событие.
     /// </summary>
-    [HttpDelete("{id:int}")]
+    [HttpDelete("{id:guid}")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
-    public IActionResult Delete(int id)
+    public IActionResult Delete(Guid id)
     {
         // 404 формируется middleware из NotFoundException, брошенного сервисом
         _eventService.Delete(id);
