@@ -8,7 +8,7 @@ public class EventResponse
     /// <summary>
     /// Идентификатор события.
     /// </summary>
-    public int Id { get; set; }
+    public Guid Id { get; set; }
 
     /// <summary>
     /// Название события.

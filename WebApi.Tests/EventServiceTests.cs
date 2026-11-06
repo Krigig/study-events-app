@@ -37,7 +37,7 @@ public class EventServiceTests
         var result = service.Create(request);
 
         //Assert
-        Assert.Equal(1, result.Id);
+        Assert.NotEqual(Guid.Empty, result.Id);
         Assert.Equal("Lecture .NET", result.Title);
         Assert.Equal("description", result.Description);
         Assert.Equal(new DateTime(2026, 10, 1, 9, 0, 0), result.StartAt);
@@ -278,12 +278,12 @@ public class EventServiceTests
         //Arrange
         IEventService service = new EventService();
         service.Create(CreateRequest("Event 1"));
-        var nonExistentId = 999;
+        var nonExistentId = Guid.NewGuid();
 
         //Act
         //Assert
         var ex = Assert.Throws<NotFoundException>(() => service.GetById(nonExistentId));
-        Assert.Contains("999", ex.Message);
+        Assert.Contains(nonExistentId.ToString(), ex.Message);
     }
 
     // Тест проверяет, что Update с несуществующим id бросает NotFoundException и не создаёт новое событие
@@ -296,7 +296,7 @@ public class EventServiceTests
 
         //Act
         //Assert
-        Assert.Throws<NotFoundException>(() => service.Update(999, CreateRequest("New Title")));
+        Assert.Throws<NotFoundException>(() => service.Update(Guid.NewGuid(), CreateRequest("New Title")));
         Assert.Single(service.GetAll(null, null, null).Items);
     }
 
@@ -310,6 +310,6 @@ public class EventServiceTests
 
         //Act
         //Assert
-        Assert.Throws<NotFoundException>(() => service.Delete(999));
+        Assert.Throws<NotFoundException>(() => service.Delete(Guid.NewGuid()));
     }
 }
