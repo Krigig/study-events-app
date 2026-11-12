@@ -15,7 +15,7 @@ public interface IEventService
     /// <summary>
     /// Возвращает событие по id. Бросает <see cref="Exceptions.NotFoundException"/>, если оно не найдено.
     /// </summary>
-    EventResponse GetById(int id);
+    EventResponse GetById(Guid id);
 
     /// <summary>
     /// Создаёт событие и возвращает его с присвоенным id.
@@ -25,10 +25,10 @@ public interface IEventService
     /// <summary>
     /// Полностью обновляет событие по id. Бросает <see cref="Exceptions.NotFoundException"/>, если оно не найдено.
     /// </summary>
-    EventResponse Update(int id, EventRequest request);
+    EventResponse Update(Guid id, EventRequest request);
 
     /// <summary>
     /// Удаляет событие по id. Бросает <see cref="Exceptions.NotFoundException"/>, если оно не найдено.
     /// </summary>
-    void Delete(int id);
+    void Delete(Guid id);
 }

@@ -2,12 +2,13 @@
 
 Учебный REST API для управления событиями на **ASP.NET Core Web API (.NET 9)**.
 
-Данные хранятся в памяти приложения (`List<Event>`), бизнес-логика вынесена в сервис
-`EventService`, подключённый через DI-контейнер.
+События и брони хранятся в памяти приложения (`List<Event>` и `List<Booking>`),
+бизнес-логика вынесена в сервисы `EventService` и `BookingService`, подключённые
+через DI-контейнер.
 
 ## Запуск
 
-Требуется [.NET SDK 9](https://dotnet.microsoft.com/download/dotnet/9.0) (подойдёт и .NET 8).
+Требуется [.NET SDK 9](https://dotnet.microsoft.com/download/dotnet/9.0).
 
 ```bash
 # из корня репозитория
@@ -21,7 +22,7 @@ dotnet run
 После запуска:
 
 - Swagger UI: <http://localhost:5194/swagger>
-- Базовый URL API: <http://localhost:5194/events>
+- Базовый URL API: <http://localhost:5194>
 
 > При запуске с профилем https адрес будет <https://localhost:7274>.
 
@@ -29,11 +30,31 @@ dotnet run
 
 | Поле        | Тип       | Обязательное | Описание                          |
 |-------------|-----------|--------------|-----------------------------------|
-| `id`        | integer   | да           | Генерируется автоматически        |
+| `id`        | Guid      | да           | Генерируется автоматически        |
 | `title`     | string    | да           | Название события, 1–500 символов, не только пробелы |
 | `description` | string | нет          | Описание события, до 4000 символов |
 | `startAt`   | DateTime  | да           | Дата и время начала               |
 | `endAt`     | DateTime  | да           | Дата и время окончания (позже `startAt`) |
+
+## Модель брони
+
+| Поле          | Тип             | Описание |
+|---------------|-----------------|----------|
+| `id`          | Guid            | Идентификатор брони, генерируется автоматически |
+| `eventId`     | Guid            | Идентификатор события |
+| `status`      | BookingStatus   | Текущий статус брони |
+| `createdAt`   | DateTime (UTC)  | Время создания брони |
+| `processedAt` | DateTime (UTC)  | Время обработки; до обработки содержит значение по умолчанию `0001-01-01T00:00:00` |
+
+Возможные значения `BookingStatus`:
+
+| Значение | Название    | Описание |
+|----------|-------------|----------|
+| `0`      | `Pending`   | Бронь создана и ожидает обработки |
+| `1`      | `Confirmed` | Бронь подтверждена |
+| `2`      | `Rejected`  | Бронь отклонена; зарезервировано для дальнейшей логики обработки |
+
+В JSON статус сериализуется числом.
 
 ## Эндпоинты
 
@@ -44,6 +65,8 @@ dotnet run
 | `POST`  | `/events`     | Создать событие                   | 201   | 400 (валидация) |
 | `PUT`   | `/events/{id}`| Обновить событие целиком          | 200   | 404, 400      |
 | `DELETE`| `/events/{id}`| Удалить событие                   | 204   | 404           |
+| `POST`  | `/events/{id}/book` | Создать бронь для события    | 202   | 404           |
+| `GET`   | `/bookings/{id}` | Получить текущее состояние брони | 200 | 404           |
 
 ### Фильтрация и пагинация GET /events
 
@@ -99,11 +122,12 @@ curl -X POST http://localhost:5194/events \
   }'
 ```
 
-Ответ `201 Created` с заголовком `Location: http://localhost:5194/events/1`:
+Ответ `201 Created` с заголовком
+`Location: http://localhost:5194/events/6f9619ff-8b86-d011-b42d-00cf4fc964ff`:
 
 ```json
 {
-  "id": 1,
+  "id": "6f9619ff-8b86-d011-b42d-00cf4fc964ff",
   "title": "Встреча команды",
   "description": "Еженедельный синк",
   "startAt": "2026-09-01T10:00:00",
@@ -111,10 +135,77 @@ curl -X POST http://localhost:5194/events \
 }
 ```
 
+## Бронирование и фоновая обработка
+
+`POST /events/{id}/book` проверяет существование события и создаёт бронь со
+статусом `Pending`. Ответ имеет код `202 Accepted`, содержит созданную бронь и
+заголовок `Location` со ссылкой на `GET /bookings/{bookingId}`.
+
+Зарегистрированный через `AddHostedService` фоновый сервис:
+
+1. раз в секунду получает брони в статусе `Pending`;
+2. для каждой брони ждёт две секунды, имитируя обращение к внешней системе;
+3. переводит бронь в `Confirmed` и записывает текущее UTC-время в `ProcessedAt`;
+4. сохраняет изменения в хранилище в памяти.
+
+Брони обрабатываются последовательно, поэтому при наличии очереди обработка
+конкретной брони может занять больше двух секунд. После перезапуска приложения
+данные событий и броней теряются.
+
+### Пример сценария бронирования
+
+Сначала создайте событие описанным выше запросом и возьмите его `id`. Затем
+создайте бронь:
+
+```bash
+curl -i -X POST http://localhost:5194/events/6f9619ff-8b86-d011-b42d-00cf4fc964ff/book
+```
+
+Пример ответа:
+
+```http
+HTTP/1.1 202 Accepted
+Location: http://localhost:5194/bookings/a9d8c7b6-5e4f-4321-9876-123456789abc
+Content-Type: application/json
+```
+
+```json
+{
+  "id": "a9d8c7b6-5e4f-4321-9876-123456789abc",
+  "eventId": "6f9619ff-8b86-d011-b42d-00cf4fc964ff",
+  "status": 0,
+  "createdAt": "2026-11-05T12:00:00Z",
+  "processedAt": "0001-01-01T00:00:00"
+}
+```
+
+Получите текущее состояние брони:
+
+```bash
+curl http://localhost:5194/bookings/a9d8c7b6-5e4f-4321-9876-123456789abc
+```
+
+Сразу после создания ответ содержит `status: 0` (`Pending`). Через несколько
+секунд повторите запрос — фоновый сервис вернёт `status: 1` (`Confirmed`) и
+заполненное поле `processedAt`:
+
+```json
+{
+  "id": "a9d8c7b6-5e4f-4321-9876-123456789abc",
+  "eventId": "6f9619ff-8b86-d011-b42d-00cf4fc964ff",
+  "status": 1,
+  "createdAt": "2026-11-05T12:00:00Z",
+  "processedAt": "2026-11-05T12:00:02Z"
+}
+```
+
+Если событие или бронь не найдены, соответствующий запрос возвращает
+`404 Not Found` с `ProblemDetails`.
+
 ### Пример обновления события
 
 ```bash
-curl -X PUT http://localhost:5194/events/1 \
+curl -X PUT http://localhost:5194/events/6f9619ff-8b86-d011-b42d-00cf4fc964ff \
   -H "Content-Type: application/json" \
   -d '{
     "title": "Встреча команды (обновлено)",
@@ -178,40 +269,46 @@ curl -X PUT http://localhost:5194/events/1 \
 | `NotFoundException`  | 404 Not Found    |
 | любое другое          | 500 Internal Server Error |
 
-Пример ответа от middleware (например, `GET /events/999` — сервис бросает `NotFoundException`):
+Пример ответа от middleware (например,
+`GET /events/6f9619ff-8b86-d011-b42d-00cf4fc96400` — сервис бросает
+`NotFoundException`):
 
 ```json
 {
   "status": 404,
-  "detail": "Событие с id = 999 не найдено."
+  "detail": "Событие с id = 6f9619ff-8b86-d011-b42d-00cf4fc96400 не найдено."
 }
 ```
 
 ## Тесты
 
-Юнит-тесты на **xUnit** покрывают CRUD, фильтрацию (title/from/to), пагинацию,
-комбинированные сценарии и валидацию `EventRequest`:
+Юнит-тесты на **xUnit** покрывают CRUD событий, фильтрацию, пагинацию,
+валидацию `EventRequest`, создание и получение броней, уникальность их
+идентификаторов и изменение статуса:
 
 ```bash
-# из папки WebApi (тестовый проект включён в WebApi.sln)
-cd WebApi
-dotnet test
+# из корня репозитория
+dotnet test WebApi.Tests/WebApi.Tests.csproj
 ```
 
 ## Структура проекта
 
 ```
 WebApi/
-├── Controllers/EventController.cs  # Эндпоинты REST API (тонкие, без логики)
-├── Services/EventService.cs        # Бизнес-логика и хранение данных в памяти
-├── Interfaces/IEventService.cs     # Контракт сервиса
+├── Controllers/                    # Эндпоинты событий и броней
+├── Services/
+│   ├── EventService.cs             # Бизнес-логика событий
+│   ├── BookingService.cs           # Хранение и изменение броней
+│   └── BookingProcessingBackgroundService.cs # Фоновое подтверждение броней
+├── Interfaces/                     # Контракты сервисов
 ├── Middleware/GlobalExceptionHandlingMiddleware.cs  # Глобальная обработка ошибок
-├── Exceptions/NotFoundException.cs # 404 при отсутствии события
+├── Exceptions/NotFoundException.cs # 404 при отсутствии ресурса
 └── Models/                         # Доменная модель и DTO
-    ├── Event.cs                    # Модель события
-    ├── EventRequest.cs             # DTO создания/обновления (с валидацией)
-    ├── EventResponse.cs            # DTO ответа
-    └── PaginatedResult.cs          # Обёртка ответа для пагинации
+    ├── Event.cs, Booking.cs        # Доменные модели
+    ├── EventRequest.cs             # DTO создания/обновления события
+    ├── EventResponse.cs            # DTO ответа события
+    ├── BookingResponse.cs          # DTO ответа брони
+    └── PaginatedResult.cs          # Обёртка пагинации
 
 WebApi.Tests/                       # Юнит-тесты (xUnit)
 ```
