@@ -11,8 +11,16 @@ namespace WebApi.Services;
 /// </summary>
 public class EventService : IEventService
 {
-    // Коллекция событий в памяти приложения
-    private readonly List<Event> _events = [];
+    private readonly IEventStore _eventStore;
+
+    public EventService() : this(new InMemoryEventStore())
+    {
+    }
+
+    public EventService(IEventStore eventStore)
+    {
+        _eventStore = eventStore;
+    }
 
     // Метод получения событий с опциональной фильтрацией и пагинацией.
     // Фильтры комбинируются (логическое И), применяются только если переданы.
@@ -20,7 +28,7 @@ public class EventService : IEventService
     public PaginatedResult<EventResponse> GetAll(
         string? title, DateTime? from, DateTime? to, int page = 1, int pageSize = 10)
     {
-        IEnumerable<Event> query = _events;
+        IEnumerable<Event> query = _eventStore.GetAll();
 
         // Частичное совпадение, регистронезависимо.
         // Пустая строка или пробелы игнорируются — как и отсутствие параметра.
@@ -64,33 +72,45 @@ public class EventService : IEventService
     // Метод получения события по id; бросает NotFoundException, если события нет
     public EventResponse GetById(Guid id)
     {
-        var @event = _events.FirstOrDefault(e => e.Id == id);
+        var @event = _eventStore.GetById(id);
         return @event is null
             ? throw new NotFoundException($"Событие с id = {id} не найдено.")
             : ToResponse(@event);
     }
 
-    // Метод создания события
-    public EventResponse Create(EventRequest request)
+    public bool TryReserveSeat(Guid id)
     {
-        var @event = new Event
-        {
-            Id = Guid.NewGuid(),
-            Title = request.Title,
-            Description = request.Description,
-            // Не-null гарантированы валидацией [ApiController] до вызова сервиса
-            StartAt = request.StartAt!.Value,
-            EndAt = request.EndAt!.Value
-        };
+        var @event = _eventStore.GetById(id)
+            ?? throw new NotFoundException($"Событие с id = {id} не найдено.");
+        // Event хранится по ссылке: TryReserveSeats обновляет объект в хранилище.
+        return @event.TryReserveSeats();
+    }
 
-        _events.Add(@event);
+    public void ReleaseSeat(Guid id)
+    {
+        var @event = _eventStore.GetById(id)
+            ?? throw new NotFoundException($"Событие с id = {id} не найдено.");
+        @event.ReleaseSeats();
+    }
+
+    // Метод создания события
+    public EventResponse Create(CreateEventRequest request)
+    {
+        // Не-null гарантированы валидацией [ApiController] до вызова сервиса.
+        var @event = Event.Create(request.Title, request.Description,
+            request.StartAt!.Value, request.EndAt!.Value, request.TotalSeats!.Value);
+
+        if (!_eventStore.TryAdd(@event))
+        {
+            throw new InvalidOperationException($"Событие с id = {@event.Id} уже существует.");
+        }
         return ToResponse(@event);
     }
 
     // Метод полного обновления события по id; бросает NotFoundException, если события нет
     public EventResponse Update(Guid id, EventRequest request)
     {
-        var @event = _events.FirstOrDefault(e => e.Id == id);
+        var @event = _eventStore.GetById(id);
         if (@event is null)
         {
             throw new NotFoundException($"Событие с id = {id} не найдено.");
@@ -108,13 +128,10 @@ public class EventService : IEventService
     // Метод удаления события по id; бросает NotFoundException, если события нет
     public void Delete(Guid id)
     {
-        var eventToDelete = _events.FirstOrDefault(e => e.Id == id);
-        if (eventToDelete is null)
+        if (!_eventStore.TryRemove(id))
         {
             throw new NotFoundException($"Событие с id = {id} не найдено.");
         }
-
-        _events.Remove(eventToDelete);
     }
 
     // Маппинг доменной модели в DTO ответа
@@ -124,6 +141,8 @@ public class EventService : IEventService
         Title = @event.Title,
         Description = @event.Description,
         StartAt = @event.StartAt,
-        EndAt = @event.EndAt
+        EndAt = @event.EndAt,
+        TotalSeats = @event.TotalSeats,
+        AvailableSeats = @event.AvailableSeats
     };
 }

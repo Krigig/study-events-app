@@ -6,42 +6,66 @@ namespace WebApi.Services;
 
 /// <summary>
 /// Сервис для работы с бронями.
-/// Данные хранятся в памяти приложения, поэтому сервис
-/// регистрируется в DI-контейнере как Singleton.
+/// Хранилище подключается через DI.
 /// </summary>
 public class BookingService : IBookingService
 {
-    private readonly IEventService _eventService;
-    private readonly List<Booking> _bookings = [];
+    private readonly IEventStore _eventStore;
+    private readonly IBookingStore _bookingStore;
+    private readonly object _bookingLock = new();
 
-    public BookingService(IEventService eventService)
+    public BookingService(IEventStore eventStore, IBookingStore bookingStore)
     {
-        _eventService = eventService;
+        _eventStore = eventStore;
+        _bookingStore = bookingStore;
     }
 
     // Метод создания брони для события; бросает NotFoundException, если события нет
     public Task<BookingResponse> CreateBookingAsync(Guid eventId)
     {
-        // Проверяем существование события: NotFoundException даст 404 через middleware
-        _eventService.GetById(eventId);
-
-        var booking = new Booking
+        lock (_bookingLock)
         {
-            Id = Guid.NewGuid(),
-            EventId = eventId,
-            BookingStatus = BookingStatus.Pending,
-            CreatedAt = DateTime.UtcNow,
-            ProcessedAt = DateTime.MinValue
-        };
+            var @event = _eventStore.GetById(eventId)
+                ?? throw new NotFoundException($"Событие с id = {eventId} не найдено.");
 
-        _bookings.Add(booking);
-        return Task.FromResult(ToResponse(booking));
+            if (!@event.TryReserveSeats())
+            {
+                throw new NoAvailableSeatsException();
+            }
+
+            try
+            {
+                _eventStore.Save(@event);
+
+                var booking = new Booking
+                {
+                    Id = Guid.NewGuid(),
+                    EventId = eventId,
+                    BookingStatus = BookingStatus.Pending,
+                    CreatedAt = DateTime.UtcNow,
+                    ProcessedAt = DateTime.MinValue
+                };
+
+                if (!_bookingStore.TryAdd(booking))
+                {
+                    throw new InvalidOperationException($"Бронь с id = {booking.Id} уже существует.");
+                }
+
+                return Task.FromResult(ToResponse(booking));
+            }
+            catch
+            {
+                @event.ReleaseSeats();
+                _eventStore.Save(@event);
+                throw;
+            }
+        }
     }
 
     // Метод получения брони по id; бросает NotFoundException, если брони нет
     public Task<BookingResponse> GetBookingByIdAsync(Guid bookingId)
     {
-        var booking = _bookings.FirstOrDefault(b => b.Id == bookingId);
+        var booking = _bookingStore.GetById(bookingId);
         if (booking is null)
         {
             throw new NotFoundException($"Бронь с id = {bookingId} не найдена.");
@@ -52,8 +76,7 @@ public class BookingService : IBookingService
 
     public Task<IReadOnlyCollection<BookingResponse>> GetPendingBookingsAsync()
     {
-        IReadOnlyCollection<BookingResponse> pendingBookings = _bookings
-            .Where(booking => booking.BookingStatus == BookingStatus.Pending)
+        IReadOnlyCollection<BookingResponse> pendingBookings = _bookingStore.GetPending()
             .Select(ToResponse)
             .ToArray();
 
@@ -62,21 +85,26 @@ public class BookingService : IBookingService
 
     public Task ConfirmBookingAsync(Guid bookingId)
     {
-        var booking = _bookings.FirstOrDefault(b => b.Id == bookingId);
-        if (booking is null)
+        while (true)
         {
-            throw new NotFoundException($"Бронь с id = {bookingId} не найдена.");
+            var booking = _bookingStore.GetById(bookingId);
+            if (booking is null)
+            {
+                throw new NotFoundException($"Бронь с id = {bookingId} не найдена.");
+            }
+
+            if (booking.BookingStatus != BookingStatus.Pending)
+            {
+                return Task.CompletedTask;
+            }
+
+            var confirmed = booking.Confirm();
+
+            if (_bookingStore.TryUpdate(booking, confirmed))
+            {
+                return Task.CompletedTask;
+            }
         }
-
-        if (booking.BookingStatus != BookingStatus.Pending)
-        {
-            return Task.CompletedTask;
-        }
-
-        booking.BookingStatus = BookingStatus.Confirmed;
-        booking.ProcessedAt = DateTime.UtcNow;
-
-        return Task.CompletedTask;
     }
 
     // Маппинг доменной модели в DTO ответа

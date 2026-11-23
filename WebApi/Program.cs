@@ -1,4 +1,5 @@
 using System.Reflection;
+using System.Text.Json.Serialization;
 using WebApi.Interfaces;
 using WebApi.Middleware;
 using WebApi.Services;
@@ -6,12 +7,16 @@ using WebApi.Services;
 var builder = WebApplication.CreateBuilder(args);
 
 // Контроллеры и единый формат ошибок (ProblemDetails)
-builder.Services.AddControllers();
+builder.Services.AddControllers().AddJsonOptions(options =>
+    options.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 builder.Services.AddProblemDetails();
 
 // Бизнес-логика в сервисе, подключённом через DI.
 // Singleton — данные хранятся в памяти приложения.
+builder.Services.AddSingleton<InMemoryEventStore>();
+builder.Services.AddSingleton<IEventStore>(provider => provider.GetRequiredService<InMemoryEventStore>());
 builder.Services.AddSingleton<IEventService, EventService>();
+builder.Services.AddSingleton<IBookingStore, InMemoryBookingStore>();
 builder.Services.AddSingleton<IBookingService, BookingService>();
 builder.Services.AddHostedService<BookingProcessingBackgroundService>();
 

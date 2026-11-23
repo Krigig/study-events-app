@@ -71,7 +71,7 @@ public class EventController : ControllerBase
     [HttpPost]
     [ProducesResponseType(typeof(EventResponse), StatusCodes.Status201Created)]
     [ProducesResponseType(typeof(ValidationProblemDetails), StatusCodes.Status400BadRequest)]
-    public ActionResult<EventResponse> Create([FromBody] EventRequest request)
+    public ActionResult<EventResponse> Create([FromBody] CreateEventRequest request)
     {
         var created = _eventService.Create(request);
         return CreatedAtAction(nameof(GetById), new { id = created.Id }, created);
