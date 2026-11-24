@@ -26,6 +26,7 @@ public class BookingController : ControllerBase
     [HttpPost("events/{id:guid}/book")]
     [ProducesResponseType(typeof(BookingResponse), StatusCodes.Status202Accepted)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
     public async Task<ActionResult<BookingResponse>> Book(Guid id)
     {
         // 404 формируется middleware из NotFoundException, брошенного сервисом

@@ -3,7 +3,7 @@ using System.ComponentModel.DataAnnotations;
 namespace WebApi.Models;
 
 /// <summary>
-/// DTO для создания и обновления события.
+/// DTO для обновления события.
 /// </summary>
 public class EventRequest : IValidatableObject
 {

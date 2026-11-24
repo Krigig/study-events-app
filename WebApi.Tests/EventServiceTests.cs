@@ -12,7 +12,7 @@ namespace WebApi.Tests;
 public class EventServiceTests
 {
     // Заполнитель события для компактного Arrange
-    private static EventRequest CreateRequest(
+    private static CreateEventRequest CreateRequest(
         string title = "Test Event",
         DateTime? startAt = null,
         DateTime? endAt = null)
@@ -20,6 +20,7 @@ public class EventServiceTests
         {
             Title = title,
             Description = "description",
+            TotalSeats = 10,
             StartAt = startAt ?? new DateTime(2026, 10, 1, 10, 0, 0),
             EndAt = endAt ?? new DateTime(2026, 10, 1, 12, 0, 0)
         };
@@ -42,6 +43,8 @@ public class EventServiceTests
         Assert.Equal("description", result.Description);
         Assert.Equal(new DateTime(2026, 10, 1, 9, 0, 0), result.StartAt);
         Assert.Equal(new DateTime(2026, 10, 1, 11, 0, 0), result.EndAt);
+        Assert.Equal(10, result.TotalSeats);
+        Assert.Equal(10, result.AvailableSeats);
     }
 
     // Тест проверяет, что GetAll возвращает все созданные события
@@ -87,9 +90,13 @@ public class EventServiceTests
         //Arrange
         IEventService service = new EventService();
         var created = service.Create(CreateRequest("Old Title"));
-        var updatedRequest = CreateRequest("New Title",
-            startAt: new DateTime(2026, 11, 1, 9, 0, 0),
-            endAt: new DateTime(2026, 11, 1, 18, 0, 0));
+        var updatedRequest = new EventRequest
+        {
+            Title = "New Title",
+            Description = "description",
+            StartAt = new DateTime(2026, 11, 1, 9, 0, 0),
+            EndAt = new DateTime(2026, 11, 1, 18, 0, 0)
+        };
 
         //Act
         var result = service.Update(created.Id, updatedRequest);
@@ -100,6 +107,8 @@ public class EventServiceTests
         Assert.Equal("New Title", result.Title);
         Assert.Equal(new DateTime(2026, 11, 1, 9, 0, 0), result.StartAt);
         Assert.Equal(new DateTime(2026, 11, 1, 18, 0, 0), result.EndAt);
+        Assert.Equal(10, result.TotalSeats);
+        Assert.Equal(10, result.AvailableSeats);
 
         // Изменение видно и через GetById
         var fromGet = service.GetById(created.Id);
@@ -296,7 +305,12 @@ public class EventServiceTests
 
         //Act
         //Assert
-        Assert.Throws<NotFoundException>(() => service.Update(Guid.NewGuid(), CreateRequest("New Title")));
+        Assert.Throws<NotFoundException>(() => service.Update(Guid.NewGuid(), new EventRequest
+        {
+            Title = "New Title",
+            StartAt = new DateTime(2026, 10, 1, 10, 0, 0),
+            EndAt = new DateTime(2026, 10, 1, 12, 0, 0)
+        }));
         Assert.Single(service.GetAll(null, null, null).Items);
     }
 

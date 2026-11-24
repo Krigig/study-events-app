@@ -4,7 +4,7 @@ using WebApi.Models;
 namespace WebApi.Tests;
 
 /// <summary>
-/// Тесты валидации DTO EventRequest (IValidatableObject).
+/// Тесты валидации DTO CreateEventRequest (IValidatableObject).
 /// В проекте валидация выполняется в DTO (запускается [ApiController] до сервиса),
 /// поэтому некорректные данные проверяются напрямую через Validate().
 /// </summary>
@@ -24,9 +24,10 @@ public class EventRequestTests
     public void Validate_WithCorrectRequest_ShouldHaveNoErrors()
     {
         //Arrange
-        var request = new EventRequest
+        var request = new CreateEventRequest
         {
             Title = "Lecture .NET",
+            TotalSeats = 10,
             StartAt = new DateTime(2026, 10, 1, 10, 0, 0),
             EndAt = new DateTime(2026, 10, 1, 12, 0, 0)
         };
@@ -38,14 +39,46 @@ public class EventRequestTests
         Assert.Empty(results);
     }
 
+    [Fact]
+    public void Validate_UpdateRequestWithoutTotalSeats_ShouldHaveNoErrors()
+    {
+        var request = new EventRequest
+        {
+            Title = "Updated event",
+            StartAt = new DateTime(2026, 10, 1, 10, 0, 0),
+            EndAt = new DateTime(2026, 10, 1, 12, 0, 0)
+        };
+
+        Assert.Empty(Validate(request));
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData(0)]
+    [InlineData(-1)]
+    public void Validate_WithInvalidTotalSeats_ShouldFail(int? totalSeats)
+    {
+        var request = new CreateEventRequest
+        {
+            Title = "Event",
+            StartAt = new DateTime(2026, 10, 1, 10, 0, 0),
+            EndAt = new DateTime(2026, 10, 1, 12, 0, 0),
+            TotalSeats = totalSeats
+        };
+
+        Assert.Contains(Validate(request), result =>
+            result.MemberNames.Contains(nameof(CreateEventRequest.TotalSeats)));
+    }
+
     // Тест проверяет, что Title из одних пробелов не проходит валидацию
     [Fact]
     public void Validate_WithWhitespaceTitle_ShouldFail()
     {
         //Arrange
-        var request = new EventRequest
+        var request = new CreateEventRequest
         {
             Title = "   ",
+            TotalSeats = 10,
             StartAt = new DateTime(2026, 10, 1, 10, 0, 0),
             EndAt = new DateTime(2026, 10, 1, 12, 0, 0)
         };
@@ -62,9 +95,10 @@ public class EventRequestTests
     public void Validate_WithMissingTitle_ShouldFail()
     {
         //Arrange
-        var request = new EventRequest
+        var request = new CreateEventRequest
         {
             Title = string.Empty,
+            TotalSeats = 10,
             StartAt = new DateTime(2026, 10, 1, 10, 0, 0),
             EndAt = new DateTime(2026, 10, 1, 12, 0, 0)
         };
@@ -81,9 +115,10 @@ public class EventRequestTests
     public void Validate_WithEndAtBeforeStartAt_ShouldFail()
     {
         //Arrange
-        var request = new EventRequest
+        var request = new CreateEventRequest
         {
             Title = "Broken event",
+            TotalSeats = 10,
             StartAt = new DateTime(2026, 10, 2, 10, 0, 0),
             EndAt = new DateTime(2026, 10, 1, 12, 0, 0) // окончание раньше начала
         };
@@ -103,7 +138,7 @@ public class EventRequestTests
     {
         //Arrange
         var sameMoment = new DateTime(2026, 10, 1, 10, 0, 0);
-        var request = new EventRequest { Title = "Zero-length event", StartAt = sameMoment, EndAt = sameMoment };
+        var request = new CreateEventRequest { Title = "Zero-length event", StartAt = sameMoment, EndAt = sameMoment, TotalSeats = 10 };
 
         //Act
         var results = Validate(request);
@@ -119,9 +154,10 @@ public class EventRequestTests
     public void Validate_WithMissingDates_ShouldFail(string? startAt, string? endAt)
     {
         //Arrange
-        var request = new EventRequest
+        var request = new CreateEventRequest
         {
             Title = "Event",
+            TotalSeats = 10,
             StartAt = startAt is null ? null : DateTime.Parse(startAt),
             EndAt = endAt is null ? null : DateTime.Parse(endAt)
         };

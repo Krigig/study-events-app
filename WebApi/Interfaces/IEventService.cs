@@ -17,10 +17,16 @@ public interface IEventService
     /// </summary>
     EventResponse GetById(Guid id);
 
+    /// <summary>Резервирует одно место в хранящемся событии. Бросает NotFoundException, если его нет.</summary>
+    bool TryReserveSeat(Guid id);
+
+    /// <summary>Возвращает одно ранее зарезервированное место.</summary>
+    void ReleaseSeat(Guid id);
+
     /// <summary>
     /// Создаёт событие и возвращает его с присвоенным id.
     /// </summary>
-    EventResponse Create(EventRequest request);
+    EventResponse Create(CreateEventRequest request);
 
     /// <summary>
     /// Полностью обновляет событие по id. Бросает <see cref="Exceptions.NotFoundException"/>, если оно не найдено.
