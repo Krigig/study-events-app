@@ -1,4 +1,5 @@
-using WebApi.Interfaces;
+using Microsoft.EntityFrameworkCore;
+using WebApi.DataAccess;
 using WebApi.Models;
 
 namespace WebApi.Services;
@@ -8,19 +9,14 @@ public sealed class BookingProcessingBackgroundService : BackgroundService
 {
     private static readonly TimeSpan PollingInterval = TimeSpan.FromSeconds(1);
     private static readonly TimeSpan ProcessingDelay = TimeSpan.FromSeconds(2);
-
-    private readonly IBookingStore _bookingStore;
-    private readonly InMemoryEventStore _eventStore;
+    private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILogger<BookingProcessingBackgroundService> _logger;
-    private readonly SemaphoreSlim _processingSemaphore = new(1, 1);
 
     public BookingProcessingBackgroundService(
-        IBookingStore bookingStore,
-        InMemoryEventStore eventStore,
+        IServiceScopeFactory scopeFactory,
         ILogger<BookingProcessingBackgroundService> logger)
     {
-        _bookingStore = bookingStore;
-        _eventStore = eventStore;
+        _scopeFactory = scopeFactory;
         _logger = logger;
     }
 
@@ -32,9 +28,16 @@ public sealed class BookingProcessingBackgroundService : BackgroundService
             {
                 try
                 {
-                    var pendingBookings = _bookingStore.GetPending().ToList();
-                    var tasks = pendingBookings.Select(booking => ProcessBookingAsync(booking, stoppingToken));
-                    await Task.WhenAll(tasks);
+                    List<Guid> pendingIds;
+                    await using (var scope = _scopeFactory.CreateAsyncScope())
+                    {
+                        var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+                        pendingIds = await context.Bookings.AsNoTracking()
+                            .Where(b => b.BookingStatus == BookingStatus.Pending)
+                            .Select(b => b.Id).ToListAsync(stoppingToken);
+                    }
+
+                    await Task.WhenAll(pendingIds.Select(id => ProcessBookingAsync(id, stoppingToken)));
                 }
                 catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
                 {
@@ -54,41 +57,23 @@ public sealed class BookingProcessingBackgroundService : BackgroundService
         }
     }
 
-    private async Task ProcessBookingAsync(Booking booking, CancellationToken stoppingToken)
+    private async Task ProcessBookingAsync(Guid bookingId, CancellationToken stoppingToken)
     {
-        var semaphoreAcquired = false;
+        await Task.Delay(ProcessingDelay, stoppingToken);
         try
         {
-            // Задержки всех броней выполняются одновременно, до захвата семафора.
-            await Task.Delay(ProcessingDelay, stoppingToken);
-            await _processingSemaphore.WaitAsync(stoppingToken);
-            semaphoreAcquired = true;
-            stoppingToken.ThrowIfCancellationRequested();
-
-            var current = _bookingStore.GetById(booking.Id);
-            if (current is null || current.BookingStatus != BookingStatus.Pending)
+            await using var scope = _scopeFactory.CreateAsyncScope();
+            var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var booking = await context.Bookings.FindAsync([bookingId], stoppingToken);
+            if (booking is null || booking.BookingStatus != BookingStatus.Pending)
             {
                 return;
             }
 
-            if (_eventStore.GetById(current.EventId) is null)
-            {
-                if (!_bookingStore.TryUpdate(current, current.Reject()))
-                {
-                    throw new InvalidOperationException($"Не удалось отклонить бронь {current.Id}.");
-                }
-
-                _logger.LogWarning("Бронь {BookingId} отклонена: событие {EventId} удалено.",
-                    current.Id, current.EventId);
-                return;
-            }
-
-            if (!_bookingStore.TryUpdate(current, current.Confirm()))
-            {
-                throw new InvalidOperationException($"Не удалось подтвердить бронь {current.Id}.");
-            }
-
-            _logger.LogInformation("Бронь {BookingId} подтверждена.", current.Id);
+            var eventExists = await context.Events.AnyAsync(e => e.Id == booking.EventId, stoppingToken);
+            context.Entry(booking).CurrentValues.SetValues(eventExists ? booking.Confirm() : booking.Reject());
+            await context.SaveChangesAsync(stoppingToken);
+            _logger.LogInformation("Бронь {BookingId} обработана: {Status}.", bookingId, booking.BookingStatus);
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
         {
@@ -96,29 +81,29 @@ public sealed class BookingProcessingBackgroundService : BackgroundService
         }
         catch (Exception exception)
         {
-            _logger.LogError(exception, "Ошибка обработки брони {BookingId}.", booking.Id);
-
+            _logger.LogError(exception, "Ошибка обработки брони {BookingId}.", bookingId);
             try
             {
-                if (!semaphoreAcquired)
+                // Возврат места синхронизируем с созданием броней для того же события.
+                await DataAccessSynchronization.WriteSemaphore.WaitAsync(stoppingToken);
+                try
                 {
-                    await _processingSemaphore.WaitAsync(stoppingToken);
-                    semaphoreAcquired = true;
-                }
-
-                var current = _bookingStore.GetById(booking.Id);
-                if (current is not null && current.BookingStatus == BookingStatus.Pending &&
-                    _bookingStore.TryUpdate(current, current.Reject()))
-                {
-                    // Если событие удалено, возвращать место уже некуда.
-                    var @event = _eventStore.GetById(current.EventId);
-                    if (@event is not null)
+                    // После ошибки используем новый контекст без несохранённых изменений.
+                    await using var scope = _scopeFactory.CreateAsyncScope();
+                    var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+                    var booking = await context.Bookings.FindAsync([bookingId], stoppingToken);
+                    if (booking is not null && booking.BookingStatus == BookingStatus.Pending)
                     {
-                        @event.ReleaseSeats();
-                        _eventStore.Save(@event);
+                        context.Entry(booking).CurrentValues.SetValues(booking.Reject());
+                        var @event = await context.Events.FindAsync([booking.EventId], stoppingToken);
+                        @event?.ReleaseSeats();
+                        await context.SaveChangesAsync(stoppingToken);
+                        _logger.LogWarning("Бронь {BookingId} отклонена после ошибки.", bookingId);
                     }
-
-                    _logger.LogWarning("Бронь {BookingId} отклонена после ошибки.", current.Id);
+                }
+                finally
+                {
+                    DataAccessSynchronization.WriteSemaphore.Release();
                 }
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
@@ -127,14 +112,7 @@ public sealed class BookingProcessingBackgroundService : BackgroundService
             }
             catch (Exception rejectionException)
             {
-                _logger.LogError(rejectionException, "Не удалось отклонить бронь {BookingId}.", booking.Id);
-            }
-        }
-        finally
-        {
-            if (semaphoreAcquired)
-            {
-                _processingSemaphore.Release();
+                _logger.LogError(rejectionException, "Не удалось отклонить бронь {BookingId}.", bookingId);
             }
         }
     }

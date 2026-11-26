@@ -1,140 +1,151 @@
+using Microsoft.EntityFrameworkCore;
+using WebApi.DataAccess;
 using WebApi.Exceptions;
 using WebApi.Interfaces;
 using WebApi.Models;
 
 namespace WebApi.Services;
 
-/// <summary>
-/// Сервис для работы с событиями.
-/// Данные хранятся в памяти приложения, поэтому сервис
-/// регистрируется в DI-контейнере как Singleton.
-/// </summary>
-public class EventService : IEventService
+/// <summary>Сервис для работы с событиями.</summary>
+internal sealed class EventService : IEventService
 {
-    private readonly IEventStore _eventStore;
+    private readonly AppDbContext _context;
 
-    public EventService() : this(new InMemoryEventStore())
+    public EventService(AppDbContext context)
     {
+        _context = context;
     }
 
-    public EventService(IEventStore eventStore)
-    {
-        _eventStore = eventStore;
-    }
-
-    // Метод получения событий с опциональной фильтрацией и пагинацией.
-    // Фильтры комбинируются (логическое И), применяются только если переданы.
-    // Пагинация применяется после фильтрации.
-    public PaginatedResult<EventResponse> GetAll(
+    public async Task<PaginatedResult<EventResponse>> GetAllAsync(
         string? title, DateTime? from, DateTime? to, int page = 1, int pageSize = 10)
     {
-        IEnumerable<Event> query = _eventStore.GetAll();
-
-        // Частичное совпадение, регистронезависимо.
-        // Пустая строка или пробелы игнорируются — как и отсутствие параметра.
+        var query = _context.Events.AsNoTracking();
         if (!string.IsNullOrWhiteSpace(title))
         {
-            query = query.Where(e => e.Title.Contains(title, StringComparison.OrdinalIgnoreCase));
+            var normalizedTitle = title.ToLower();
+            query = query.Where(e => e.Title.ToLower().Contains(normalizedTitle));
         }
 
-        // События, начинающиеся не раньше указанной даты
         if (from.HasValue)
         {
             query = query.Where(e => e.StartAt >= from.Value);
         }
 
-        // События, заканчивающиеся не позже указанной даты
         if (to.HasValue)
         {
             query = query.Where(e => e.EndAt <= to.Value);
         }
 
-        // Общее количество берём до Skip/Take — с учётом фильтров
-        var totalItems = query.Count();
-        var totalPages = (int)Math.Ceiling(totalItems / (double)pageSize);
-
-        var items = query
-            .Skip((page - 1) * pageSize)
-            .Take(pageSize)
-            .Select(ToResponse)
-            .ToList();
-
+        var totalItems = await query.CountAsync();
+        var events = await query.OrderBy(e => e.StartAt).ThenBy(e => e.Title).ThenBy(e => e.Id)
+            .Skip((page - 1) * pageSize).Take(pageSize).ToListAsync();
         return new PaginatedResult<EventResponse>
         {
-            Items = items,
+            Items = events.Select(ToResponse).ToList(),
             Page = page,
             PageSize = pageSize,
             TotalItems = totalItems,
-            TotalPages = totalPages
+            TotalPages = (int)Math.Ceiling(totalItems / (double)pageSize)
         };
     }
 
-    // Метод получения события по id; бросает NotFoundException, если события нет
-    public EventResponse GetById(Guid id)
+    public async Task<EventResponse> GetByIdAsync(Guid id)
     {
-        var @event = _eventStore.GetById(id);
-        return @event is null
-            ? throw new NotFoundException($"Событие с id = {id} не найдено.")
-            : ToResponse(@event);
-    }
-
-    public bool TryReserveSeat(Guid id)
-    {
-        var @event = _eventStore.GetById(id)
+        var @event = await _context.Events.AsNoTracking().SingleOrDefaultAsync(e => e.Id == id)
             ?? throw new NotFoundException($"Событие с id = {id} не найдено.");
-        // Event хранится по ссылке: TryReserveSeats обновляет объект в хранилище.
-        return @event.TryReserveSeats();
+        return ToResponse(@event);
     }
 
-    public void ReleaseSeat(Guid id)
+    public async Task<bool> TryReserveSeatAsync(Guid id)
     {
-        var @event = _eventStore.GetById(id)
-            ?? throw new NotFoundException($"Событие с id = {id} не найдено.");
-        @event.ReleaseSeats();
+        await DataAccessSynchronization.WriteSemaphore.WaitAsync();
+        try
+        {
+            var @event = await FindForUpdateAsync(id);
+            if (!@event.TryReserveSeats())
+            {
+                return false;
+            }
+
+            await _context.SaveChangesAsync();
+            return true;
+        }
+        finally
+        {
+            DataAccessSynchronization.WriteSemaphore.Release();
+        }
     }
 
-    // Метод создания события
-    public EventResponse Create(CreateEventRequest request)
+    public async Task ReleaseSeatAsync(Guid id)
     {
-        // Не-null гарантированы валидацией [ApiController] до вызова сервиса.
+        await DataAccessSynchronization.WriteSemaphore.WaitAsync();
+        try
+        {
+            var @event = await FindForUpdateAsync(id);
+            @event.ReleaseSeats();
+            await _context.SaveChangesAsync();
+        }
+        finally
+        {
+            DataAccessSynchronization.WriteSemaphore.Release();
+        }
+    }
+
+    public async Task<EventResponse> CreateAsync(CreateEventRequest request)
+    {
         var @event = Event.Create(request.Title, request.Description,
             request.StartAt!.Value, request.EndAt!.Value, request.TotalSeats!.Value);
-
-        if (!_eventStore.TryAdd(@event))
-        {
-            throw new InvalidOperationException($"Событие с id = {@event.Id} уже существует.");
-        }
+        _context.Events.Add(@event);
+        await _context.SaveChangesAsync();
         return ToResponse(@event);
     }
 
-    // Метод полного обновления события по id; бросает NotFoundException, если события нет
-    public EventResponse Update(Guid id, EventRequest request)
+    public async Task<EventResponse> UpdateAsync(Guid id, EventRequest request)
     {
-        var @event = _eventStore.GetById(id);
-        if (@event is null)
+        await DataAccessSynchronization.WriteSemaphore.WaitAsync();
+        try
         {
-            throw new NotFoundException($"Событие с id = {id} не найдено.");
+            var @event = await FindForUpdateAsync(id);
+            @event.Title = request.Title;
+            @event.Description = request.Description;
+            @event.StartAt = request.StartAt!.Value;
+            @event.EndAt = request.EndAt!.Value;
+            await _context.SaveChangesAsync();
+            return ToResponse(@event);
         }
-
-        @event.Title = request.Title;
-        @event.Description = request.Description;
-        // Не-null гарантированы валидацией [ApiController] до вызова сервиса
-        @event.StartAt = request.StartAt!.Value;
-        @event.EndAt = request.EndAt!.Value;
-
-        return ToResponse(@event);
-    }
-
-    // Метод удаления события по id; бросает NotFoundException, если события нет
-    public void Delete(Guid id)
-    {
-        if (!_eventStore.TryRemove(id))
+        finally
         {
-            throw new NotFoundException($"Событие с id = {id} не найдено.");
+            DataAccessSynchronization.WriteSemaphore.Release();
         }
     }
 
-    // Маппинг доменной модели в DTO ответа
+    public async Task DeleteAsync(Guid id)
+    {
+        await DataAccessSynchronization.WriteSemaphore.WaitAsync();
+        try
+        {
+            var @event = await FindForUpdateAsync(id);
+            _context.Events.Remove(@event);
+            await _context.SaveChangesAsync();
+        }
+        finally
+        {
+            DataAccessSynchronization.WriteSemaphore.Release();
+        }
+    }
+
+    private async Task<Event> FindForUpdateAsync(Guid id)
+    {
+        var tracked = _context.Events.Local.FirstOrDefault(e => e.Id == id);
+        if (tracked is not null)
+        {
+            await _context.Entry(tracked).ReloadAsync();
+        }
+
+        return await _context.Events.FindAsync(id)
+            ?? throw new NotFoundException($"Событие с id = {id} не найдено.");
+    }
+
     private static EventResponse ToResponse(Event @event) => new()
     {
         Id = @event.Id,

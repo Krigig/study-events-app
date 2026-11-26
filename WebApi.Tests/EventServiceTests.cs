@@ -1,16 +1,19 @@
+using Microsoft.Extensions.DependencyInjection;
 using WebApi.Exceptions;
 using WebApi.Interfaces;
 using WebApi.Models;
-using WebApi.Services;
 
 namespace WebApi.Tests;
 
 /// <summary>
 /// Юнит-тесты сервиса EventService.
-/// Данные хранятся в памяти, поэтому каждый тест работает со своим экземпляром сервиса.
+/// Каждый тест использует отдельную базу EF Core InMemory.
 /// </summary>
-public class EventServiceTests
+public class EventServiceTests : IDisposable
 {
+    private readonly TestDatabase _database = new();
+    public void Dispose() => _database.Dispose();
+
     // Заполнитель события для компактного Arrange
     private static CreateEventRequest CreateRequest(
         string title = "Test Event",
@@ -27,15 +30,15 @@ public class EventServiceTests
 
     // Тест проверяет, что создание события присваивает id и сохраняет все поля
     [Fact]
-    public void Create_ShouldAssignIdAndFields()
+    public async Task Create_ShouldAssignIdAndFields()
     {
         //Arrange
-        IEventService service = new EventService();
+        IEventService service = _database.CreateEventService();
         var request = CreateRequest("Lecture .NET", startAt: new DateTime(2026, 10, 1, 9, 0, 0),
             endAt: new DateTime(2026, 10, 1, 11, 0, 0));
 
         //Act
-        var result = service.Create(request);
+        var result = await service.CreateAsync(request);
 
         //Assert
         Assert.NotEqual(Guid.Empty, result.Id);
@@ -49,16 +52,16 @@ public class EventServiceTests
 
     // Тест проверяет, что GetAll возвращает все созданные события
     [Fact]
-    public void GetAll_ShouldReturnAllEvents()
+    public async Task GetAll_ShouldReturnAllEvents()
     {
         //Arrange
-        IEventService service = new EventService();
-        service.Create(CreateRequest("Event 1"));
-        service.Create(CreateRequest("Event 2"));
-        service.Create(CreateRequest("Event 3"));
+        IEventService service = _database.CreateEventService();
+        await service.CreateAsync(CreateRequest("Event 1"));
+        await service.CreateAsync(CreateRequest("Event 2"));
+        await service.CreateAsync(CreateRequest("Event 3"));
 
         //Act
-        var result = service.GetAll(null, null, null);
+        var result = await service.GetAllAsync(null, null, null);
 
         //Assert
         Assert.Equal(3, result.TotalItems);
@@ -68,14 +71,16 @@ public class EventServiceTests
 
     // Тест проверяет, что GetById возвращает событие по существующему id
     [Fact]
-    public void GetById_ShouldReturnEvent()
+    public async Task GetById_ShouldReturnEvent()
     {
         //Arrange
-        IEventService service = new EventService();
-        var created = service.Create(CreateRequest("Event 1"));
+        IEventService service = _database.CreateEventService();
+        var created = await service.CreateAsync(CreateRequest("Event 1"));
 
         //Act
-        var result = service.GetById(created.Id);
+        using var scope = _database.CreateScope();
+        var reader = scope.ServiceProvider.GetRequiredService<IEventService>();
+        var result = await reader.GetByIdAsync(created.Id);
 
         //Assert
         Assert.NotNull(result);
@@ -85,11 +90,11 @@ public class EventServiceTests
 
     // Тест проверяет, что обновление изменяет поля существующего события
     [Fact]
-    public void Update_ShouldUpdateExistingEvent()
+    public async Task Update_ShouldUpdateExistingEvent()
     {
         //Arrange
-        IEventService service = new EventService();
-        var created = service.Create(CreateRequest("Old Title"));
+        IEventService service = _database.CreateEventService();
+        var created = await service.CreateAsync(CreateRequest("Old Title"));
         var updatedRequest = new EventRequest
         {
             Title = "New Title",
@@ -99,7 +104,7 @@ public class EventServiceTests
         };
 
         //Act
-        var result = service.Update(created.Id, updatedRequest);
+        var result = await service.UpdateAsync(created.Id, updatedRequest);
 
         //Assert
         Assert.NotNull(result);
@@ -111,38 +116,38 @@ public class EventServiceTests
         Assert.Equal(10, result.AvailableSeats);
 
         // Изменение видно и через GetById
-        var fromGet = service.GetById(created.Id);
+        var fromGet = await service.GetByIdAsync(created.Id);
         Assert.Equal("New Title", fromGet!.Title);
     }
 
     // Тест проверяет, что удаление убирает событие из хранилища
     [Fact]
-    public void Delete_ShouldRemoveEvent()
+    public async Task Delete_ShouldRemoveEvent()
     {
         //Arrange
-        IEventService service = new EventService();
-        var created = service.Create(CreateRequest("Event 1"));
+        IEventService service = _database.CreateEventService();
+        var created = await service.CreateAsync(CreateRequest("Event 1"));
 
         //Act
-        service.Delete(created.Id);
+        await service.DeleteAsync(created.Id);
 
         //Assert
-        Assert.Throws<NotFoundException>(() => service.GetById(created.Id));
+        await Assert.ThrowsAsync<NotFoundException>(() => service.GetByIdAsync(created.Id));
     }
 
     // Тест проверяет, что фильтрация по названию — частичное совпадение без учёта регистра
     [Fact]
-    public void GetAll_FilterByTitle_ShouldBeCaseInsensitivePartial()
+    public async Task GetAll_FilterByTitle_ShouldBeCaseInsensitivePartial()
     {
         //Arrange
-        IEventService service = new EventService();
-        service.Create(CreateRequest("Lecture .NET Basics"));
-        service.Create(CreateRequest("Workshop ADVANCED C#"));
-        service.Create(CreateRequest("Meetup dotnet community"));
+        IEventService service = _database.CreateEventService();
+        await service.CreateAsync(CreateRequest("Lecture .NET Basics"));
+        await service.CreateAsync(CreateRequest("Workshop ADVANCED C#"));
+        await service.CreateAsync(CreateRequest("Meetup dotnet community"));
         var expectedTitles = new List<string> { "Lecture .NET Basics", "Meetup dotnet community" };
 
         //Act
-        var result = service.GetAll("NET", null, null);
+        var result = await service.GetAllAsync("NET", null, null);
 
         //Assert
         Assert.Equal(expectedTitles, result.Items.Select(e => e.Title));
@@ -151,20 +156,20 @@ public class EventServiceTests
 
     // Тест проверяет, что фильтр from включает события, начинающиеся ровно с указанной даты (не раньше)
     [Fact]
-    public void GetAll_FilterByFrom_ShouldIncludeBoundary()
+    public async Task GetAll_FilterByFrom_ShouldIncludeBoundary()
     {
         //Arrange
-        IEventService service = new EventService();
-        service.Create(CreateRequest("Early", startAt: new DateTime(2026, 9, 1, 10, 0, 0),
+        IEventService service = _database.CreateEventService();
+        await service.CreateAsync(CreateRequest("Early", startAt: new DateTime(2026, 9, 1, 10, 0, 0),
             endAt: new DateTime(2026, 9, 1, 12, 0, 0)));
-        service.Create(CreateRequest("Boundary", startAt: new DateTime(2026, 10, 1, 10, 0, 0),
+        await service.CreateAsync(CreateRequest("Boundary", startAt: new DateTime(2026, 10, 1, 10, 0, 0),
             endAt: new DateTime(2026, 10, 1, 12, 0, 0)));
-        service.Create(CreateRequest("Late", startAt: new DateTime(2026, 11, 1, 10, 0, 0),
+        await service.CreateAsync(CreateRequest("Late", startAt: new DateTime(2026, 11, 1, 10, 0, 0),
             endAt: new DateTime(2026, 11, 1, 12, 0, 0)));
         var from = new DateTime(2026, 10, 1, 10, 0, 0);
 
         //Act
-        var result = service.GetAll(null, from, null);
+        var result = await service.GetAllAsync(null, from, null);
 
         //Assert
         Assert.Equal(new List<string> { "Boundary", "Late" }, result.Items.Select(e => e.Title));
@@ -172,20 +177,20 @@ public class EventServiceTests
 
     // Тест проверяет, что фильтр to включает события, заканчивающиеся ровно в указанную дату (не позже)
     [Fact]
-    public void GetAll_FilterByTo_ShouldIncludeBoundary()
+    public async Task GetAll_FilterByTo_ShouldIncludeBoundary()
     {
         //Arrange
-        IEventService service = new EventService();
-        service.Create(CreateRequest("Early", startAt: new DateTime(2026, 9, 1, 10, 0, 0),
+        IEventService service = _database.CreateEventService();
+        await service.CreateAsync(CreateRequest("Early", startAt: new DateTime(2026, 9, 1, 10, 0, 0),
             endAt: new DateTime(2026, 9, 1, 12, 0, 0)));
-        service.Create(CreateRequest("Boundary", startAt: new DateTime(2026, 10, 1, 10, 0, 0),
+        await service.CreateAsync(CreateRequest("Boundary", startAt: new DateTime(2026, 10, 1, 10, 0, 0),
             endAt: new DateTime(2026, 10, 1, 12, 0, 0)));
-        service.Create(CreateRequest("Late", startAt: new DateTime(2026, 11, 1, 10, 0, 0),
+        await service.CreateAsync(CreateRequest("Late", startAt: new DateTime(2026, 11, 1, 10, 0, 0),
             endAt: new DateTime(2026, 11, 1, 12, 0, 0)));
         var to = new DateTime(2026, 10, 1, 12, 0, 0);
 
         //Act
-        var result = service.GetAll(null, null, to);
+        var result = await service.GetAllAsync(null, null, to);
 
         //Assert
         Assert.Equal(new List<string> { "Early", "Boundary" }, result.Items.Select(e => e.Title));
@@ -193,17 +198,17 @@ public class EventServiceTests
 
     // Тест проверяет, что пагинация возвращает нужную страницу, а totalItems считается до Skip/Take
     [Fact]
-    public void GetAll_Pagination_ShouldSkipAndTake()
+    public async Task GetAll_Pagination_ShouldSkipAndTake()
     {
         //Arrange
-        IEventService service = new EventService();
+        IEventService service = _database.CreateEventService();
         for (var i = 1; i <= 7; i++)
         {
-            service.Create(CreateRequest($"Event {i}"));
+            await service.CreateAsync(CreateRequest($"Event {i}"));
         }
 
         //Act
-        var result = service.GetAll(null, null, null, page: 2, pageSize: 3);
+        var result = await service.GetAllAsync(null, null, null, page: 2, pageSize: 3);
 
         //Assert
         Assert.Equal(7, result.TotalItems);
@@ -216,17 +221,17 @@ public class EventServiceTests
 
     // Тест проверяет, что последняя неполная страница содержит остаток элементов
     [Fact]
-    public void GetAll_Pagination_LastPage_ShouldContainRemainder()
+    public async Task GetAll_Pagination_LastPage_ShouldContainRemainder()
     {
         //Arrange
-        IEventService service = new EventService();
+        IEventService service = _database.CreateEventService();
         for (var i = 1; i <= 7; i++)
         {
-            service.Create(CreateRequest($"Event {i}"));
+            await service.CreateAsync(CreateRequest($"Event {i}"));
         }
 
         //Act
-        var result = service.GetAll(null, null, null, page: 3, pageSize: 3);
+        var result = await service.GetAllAsync(null, null, null, page: 3, pageSize: 3);
 
         //Assert
         Assert.Single(result.Items);
@@ -235,21 +240,21 @@ public class EventServiceTests
 
     // Тест проверяет, что все фильтры работают совместно (логическое И) вместе с пагинацией
     [Fact]
-    public void GetAll_CombinedFilters_ShouldApplyAllTogether()
+    public async Task GetAll_CombinedFilters_ShouldApplyAllTogether()
     {
         //Arrange
-        IEventService service = new EventService();
-        service.Create(CreateRequest("dotnet lecture", startAt: new DateTime(2026, 10, 1, 10, 0, 0),
+        IEventService service = _database.CreateEventService();
+        await service.CreateAsync(CreateRequest("dotnet lecture", startAt: new DateTime(2026, 10, 1, 10, 0, 0),
             endAt: new DateTime(2026, 10, 1, 12, 0, 0)));
-        service.Create(CreateRequest("dotnet workshop", startAt: new DateTime(2026, 11, 5, 9, 0, 0),
+        await service.CreateAsync(CreateRequest("dotnet workshop", startAt: new DateTime(2026, 11, 5, 9, 0, 0),
             endAt: new DateTime(2026, 11, 5, 17, 0, 0)));
-        service.Create(CreateRequest("dotnet meetup", startAt: new DateTime(2026, 12, 10, 18, 0, 0),
+        await service.CreateAsync(CreateRequest("dotnet meetup", startAt: new DateTime(2026, 12, 10, 18, 0, 0),
             endAt: new DateTime(2026, 12, 10, 21, 0, 0)));
-        service.Create(CreateRequest("java conference", startAt: new DateTime(2026, 11, 6, 9, 0, 0),
+        await service.CreateAsync(CreateRequest("java conference", startAt: new DateTime(2026, 11, 6, 9, 0, 0),
             endAt: new DateTime(2026, 11, 6, 17, 0, 0)));
 
         //Act
-        var result = service.GetAll(
+        var result = await service.GetAllAsync(
             "dotnet",
             from: new DateTime(2026, 11, 1),
             to: new DateTime(2026, 12, 1),
@@ -266,15 +271,15 @@ public class EventServiceTests
     [Theory]
     [InlineData("")]
     [InlineData("   ")]
-    public void GetAll_EmptyTitle_ShouldBeIgnored(string title)
+    public async Task GetAll_EmptyTitle_ShouldBeIgnored(string title)
     {
         //Arrange
-        IEventService service = new EventService();
-        service.Create(CreateRequest("Event 1"));
-        service.Create(CreateRequest("Event 2"));
+        IEventService service = _database.CreateEventService();
+        await service.CreateAsync(CreateRequest("Event 1"));
+        await service.CreateAsync(CreateRequest("Event 2"));
 
         //Act
-        var result = service.GetAll(title, null, null);
+        var result = await service.GetAllAsync(title, null, null);
 
         //Assert
         Assert.Equal(2, result.TotalItems);
@@ -282,48 +287,48 @@ public class EventServiceTests
 
     // Тест проверяет, что GetById с несуществующим id бросает NotFoundException
     [Fact]
-    public void GetById_WithNonExistentId_ShouldThrowNotFound()
+    public async Task GetById_WithNonExistentId_ShouldThrowNotFound()
     {
         //Arrange
-        IEventService service = new EventService();
-        service.Create(CreateRequest("Event 1"));
+        IEventService service = _database.CreateEventService();
+        await service.CreateAsync(CreateRequest("Event 1"));
         var nonExistentId = Guid.NewGuid();
 
         //Act
         //Assert
-        var ex = Assert.Throws<NotFoundException>(() => service.GetById(nonExistentId));
+        var ex = await Assert.ThrowsAsync<NotFoundException>(() => service.GetByIdAsync(nonExistentId));
         Assert.Contains(nonExistentId.ToString(), ex.Message);
     }
 
     // Тест проверяет, что Update с несуществующим id бросает NotFoundException и не создаёт новое событие
     [Fact]
-    public void Update_WithNonExistentId_ShouldThrowNotFound()
+    public async Task Update_WithNonExistentId_ShouldThrowNotFound()
     {
         //Arrange
-        IEventService service = new EventService();
-        service.Create(CreateRequest("Event 1"));
+        IEventService service = _database.CreateEventService();
+        await service.CreateAsync(CreateRequest("Event 1"));
 
         //Act
         //Assert
-        Assert.Throws<NotFoundException>(() => service.Update(Guid.NewGuid(), new EventRequest
+        await Assert.ThrowsAsync<NotFoundException>(() => service.UpdateAsync(Guid.NewGuid(), new EventRequest
         {
             Title = "New Title",
             StartAt = new DateTime(2026, 10, 1, 10, 0, 0),
             EndAt = new DateTime(2026, 10, 1, 12, 0, 0)
         }));
-        Assert.Single(service.GetAll(null, null, null).Items);
+        Assert.Single((await service.GetAllAsync(null, null, null)).Items);
     }
 
     // Тест проверяет, что Delete с несуществующим id бросает NotFoundException
     [Fact]
-    public void Delete_WithNonExistentId_ShouldThrowNotFound()
+    public async Task Delete_WithNonExistentId_ShouldThrowNotFound()
     {
         //Arrange
-        IEventService service = new EventService();
-        service.Create(CreateRequest("Event 1"));
+        IEventService service = _database.CreateEventService();
+        await service.CreateAsync(CreateRequest("Event 1"));
 
         //Act
         //Assert
-        Assert.Throws<NotFoundException>(() => service.Delete(Guid.NewGuid()));
+        await Assert.ThrowsAsync<NotFoundException>(() => service.DeleteAsync(Guid.NewGuid()));
     }
 }

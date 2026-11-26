@@ -3,11 +3,15 @@ using System.ComponentModel.DataAnnotations;
 namespace WebApi.Models;
 
 /// <summary>
-/// Доменная модель события (хранится в памяти приложения).
+/// Доменная модель события.
 /// </summary>
 public class Event
 {
     private readonly object _seatsLock = new();
+
+    private Event()
+    {
+    }
 
     /// <summary>
     /// Идентификатор события. Генерируется на сервере.
@@ -17,7 +21,7 @@ public class Event
     /// <summary>
     /// Название события.
     /// </summary>
-    public string Title { get; set; } = string.Empty;
+    public string Title { get; set; } = null!;
 
     /// <summary>
     /// Описание события (опционально).
@@ -39,6 +43,9 @@ public class Event
 
     /// <summary>Количество свободных мест.</summary>
     public int AvailableSeats { get; private set; }
+
+    /// <summary>Брони события.</summary>
+    public ICollection<Booking> Bookings { get; set; } = new List<Booking>();
 
     internal static Event Create(string title, string? description, DateTime startAt, DateTime endAt, int totalSeats)
     {
