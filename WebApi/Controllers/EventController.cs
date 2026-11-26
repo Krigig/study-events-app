@@ -33,7 +33,7 @@ public class EventController : ControllerBase
     [HttpGet]
     [ProducesResponseType(typeof(PaginatedResult<EventResponse>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
-    public ActionResult<PaginatedResult<EventResponse>> GetAll(
+    public async Task<ActionResult<PaginatedResult<EventResponse>>> GetAll(
         [FromQuery] string? title,
         [FromQuery] DateTime? from,
         [FromQuery] DateTime? to,
@@ -50,7 +50,7 @@ public class EventController : ControllerBase
             });
         }
 
-        return Ok(_eventService.GetAll(title, from, to, page, pageSize));
+        return Ok(await _eventService.GetAllAsync(title, from, to, page, pageSize));
     }
 
     /// <summary>
@@ -59,10 +59,10 @@ public class EventController : ControllerBase
     [HttpGet("{id:guid}")]
     [ProducesResponseType(typeof(EventResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
-    public ActionResult<EventResponse> GetById(Guid id)
+    public async Task<ActionResult<EventResponse>> GetById(Guid id)
     {
         // 404 формируется middleware из NotFoundException, брошенного сервисом
-        return Ok(_eventService.GetById(id));
+        return Ok(await _eventService.GetByIdAsync(id));
     }
 
     /// <summary>
@@ -71,9 +71,9 @@ public class EventController : ControllerBase
     [HttpPost]
     [ProducesResponseType(typeof(EventResponse), StatusCodes.Status201Created)]
     [ProducesResponseType(typeof(ValidationProblemDetails), StatusCodes.Status400BadRequest)]
-    public ActionResult<EventResponse> Create([FromBody] CreateEventRequest request)
+    public async Task<ActionResult<EventResponse>> Create([FromBody] CreateEventRequest request)
     {
-        var created = _eventService.Create(request);
+        var created = await _eventService.CreateAsync(request);
         return CreatedAtAction(nameof(GetById), new { id = created.Id }, created);
     }
 
@@ -84,10 +84,10 @@ public class EventController : ControllerBase
     [ProducesResponseType(typeof(EventResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ValidationProblemDetails), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
-    public ActionResult<EventResponse> Update(Guid id, [FromBody] EventRequest request)
+    public async Task<ActionResult<EventResponse>> Update(Guid id, [FromBody] EventRequest request)
     {
         // 404 формируется middleware из NotFoundException, брошенного сервисом
-        return Ok(_eventService.Update(id, request));
+        return Ok(await _eventService.UpdateAsync(id, request));
     }
 
     /// <summary>
@@ -96,10 +96,10 @@ public class EventController : ControllerBase
     [HttpDelete("{id:guid}")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
-    public IActionResult Delete(Guid id)
+    public async Task<IActionResult> Delete(Guid id)
     {
         // 404 формируется middleware из NotFoundException, брошенного сервисом
-        _eventService.Delete(id);
+        await _eventService.DeleteAsync(id);
         return NoContent();
     }
 }

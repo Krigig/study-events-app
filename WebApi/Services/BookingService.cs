@@ -1,113 +1,102 @@
+using Microsoft.EntityFrameworkCore;
+using WebApi.DataAccess;
 using WebApi.Exceptions;
 using WebApi.Interfaces;
 using WebApi.Models;
 
 namespace WebApi.Services;
 
-/// <summary>
-/// Сервис для работы с бронями.
-/// Хранилище подключается через DI.
-/// </summary>
-public class BookingService : IBookingService
+/// <summary>Сервис для работы с бронями.</summary>
+internal sealed class BookingService : IBookingService
 {
-    private readonly IEventStore _eventStore;
-    private readonly IBookingStore _bookingStore;
-    private readonly object _bookingLock = new();
+    private readonly AppDbContext _context;
 
-    public BookingService(IEventStore eventStore, IBookingStore bookingStore)
+    public BookingService(AppDbContext context)
     {
-        _eventStore = eventStore;
-        _bookingStore = bookingStore;
+        _context = context;
     }
 
-    // Метод создания брони для события; бросает NotFoundException, если события нет
-    public Task<BookingResponse> CreateBookingAsync(Guid eventId)
+    public async Task<BookingResponse> CreateBookingAsync(Guid eventId)
     {
-        lock (_bookingLock)
+        await DataAccessSynchronization.WriteSemaphore.WaitAsync();
+        try
         {
-            var @event = _eventStore.GetById(eventId)
-                ?? throw new NotFoundException($"Событие с id = {eventId} не найдено.");
+            var tracked = _context.Events.Local.FirstOrDefault(e => e.Id == eventId);
+            if (tracked is not null)
+            {
+                await _context.Entry(tracked).ReloadAsync();
+            }
 
+            var @event = await _context.Events.FindAsync(eventId)
+                ?? throw new NotFoundException($"Событие с id = {eventId} не найдено.");
             if (!@event.TryReserveSeats())
             {
                 throw new NoAvailableSeatsException();
             }
 
+            var booking = Booking.Create(@event);
             try
             {
-                _eventStore.Save(@event);
-
-                var booking = new Booking
-                {
-                    Id = Guid.NewGuid(),
-                    EventId = eventId,
-                    BookingStatus = BookingStatus.Pending,
-                    CreatedAt = DateTime.UtcNow,
-                    ProcessedAt = DateTime.MinValue
-                };
-
-                if (!_bookingStore.TryAdd(booking))
-                {
-                    throw new InvalidOperationException($"Бронь с id = {booking.Id} уже существует.");
-                }
-
-                return Task.FromResult(ToResponse(booking));
+                _context.Bookings.Add(booking);
+                // Бронь и изменение числа мест сохраняются одной транзакцией.
+                await _context.SaveChangesAsync();
+                return ToResponse(booking);
             }
             catch
             {
+                _context.Entry(booking).State = EntityState.Detached;
+                @event.Bookings.Remove(booking);
                 @event.ReleaseSeats();
-                _eventStore.Save(@event);
                 throw;
             }
         }
-    }
-
-    // Метод получения брони по id; бросает NotFoundException, если брони нет
-    public Task<BookingResponse> GetBookingByIdAsync(Guid bookingId)
-    {
-        var booking = _bookingStore.GetById(bookingId);
-        if (booking is null)
+        finally
         {
-            throw new NotFoundException($"Бронь с id = {bookingId} не найдена.");
+            DataAccessSynchronization.WriteSemaphore.Release();
         }
-
-        return Task.FromResult(ToResponse(booking));
     }
 
-    public Task<IReadOnlyCollection<BookingResponse>> GetPendingBookingsAsync()
+    public async Task<BookingResponse> GetBookingByIdAsync(Guid bookingId)
     {
-        IReadOnlyCollection<BookingResponse> pendingBookings = _bookingStore.GetPending()
-            .Select(ToResponse)
-            .ToArray();
-
-        return Task.FromResult(pendingBookings);
+        var booking = await _context.Bookings.AsNoTracking().SingleOrDefaultAsync(b => b.Id == bookingId)
+            ?? throw new NotFoundException($"Бронь с id = {bookingId} не найдена.");
+        return ToResponse(booking);
     }
 
-    public Task ConfirmBookingAsync(Guid bookingId)
+    public async Task<IReadOnlyCollection<BookingResponse>> GetPendingBookingsAsync()
     {
-        while (true)
+        var bookings = await _context.Bookings.AsNoTracking()
+            .Where(b => b.BookingStatus == BookingStatus.Pending).ToListAsync();
+        return bookings.Select(ToResponse).ToArray();
+    }
+
+    public async Task ConfirmBookingAsync(Guid bookingId)
+    {
+        await DataAccessSynchronization.WriteSemaphore.WaitAsync();
+        try
         {
-            var booking = _bookingStore.GetById(bookingId);
-            if (booking is null)
+            var tracked = _context.Bookings.Local.FirstOrDefault(b => b.Id == bookingId);
+            if (tracked is not null)
             {
-                throw new NotFoundException($"Бронь с id = {bookingId} не найдена.");
+                await _context.Entry(tracked).ReloadAsync();
             }
 
+            var booking = await _context.Bookings.FindAsync(bookingId)
+                ?? throw new NotFoundException($"Бронь с id = {bookingId} не найдена.");
             if (booking.BookingStatus != BookingStatus.Pending)
             {
-                return Task.CompletedTask;
+                return;
             }
 
-            var confirmed = booking.Confirm();
-
-            if (_bookingStore.TryUpdate(booking, confirmed))
-            {
-                return Task.CompletedTask;
-            }
+            _context.Entry(booking).CurrentValues.SetValues(booking.Confirm());
+            await _context.SaveChangesAsync();
+        }
+        finally
+        {
+            DataAccessSynchronization.WriteSemaphore.Release();
         }
     }
 
-    // Маппинг доменной модели в DTO ответа
     private static BookingResponse ToResponse(Booking booking) => new()
     {
         Id = booking.Id,

@@ -4,14 +4,9 @@ namespace WebApi.Tests;
 
 public class BookingStatusTests
 {
-    private static Booking CreatePending() => new()
-    {
-        Id = Guid.NewGuid(),
-        EventId = Guid.NewGuid(),
-        BookingStatus = BookingStatus.Pending,
-        CreatedAt = DateTime.UtcNow,
-        ProcessedAt = DateTime.MinValue
-    };
+    private static Booking CreatePending() => Booking.Create(Event.Create(
+        "Test Event", null, new DateTime(2026, 12, 1, 10, 0, 0),
+        new DateTime(2026, 12, 1, 11, 0, 0), 1));
 
     [Fact]
     public void Confirm_ShouldSetStatusAndProcessedAt()
@@ -23,6 +18,7 @@ public class BookingStatusTests
         Assert.Equal(BookingStatus.Confirmed, confirmed.BookingStatus);
         Assert.InRange(confirmed.ProcessedAt, pending.CreatedAt, DateTime.UtcNow);
         Assert.Equal(pending.Id, confirmed.Id);
+        Assert.Same(pending.Event, confirmed.Event);
         Assert.Equal(BookingStatus.Pending, pending.BookingStatus);
     }
 
@@ -36,6 +32,7 @@ public class BookingStatusTests
         Assert.Equal(BookingStatus.Rejected, rejected.BookingStatus);
         Assert.InRange(rejected.ProcessedAt, pending.CreatedAt, DateTime.UtcNow);
         Assert.Equal(pending.Id, rejected.Id);
+        Assert.Same(pending.Event, rejected.Event);
         Assert.Equal(BookingStatus.Pending, pending.BookingStatus);
     }
 }

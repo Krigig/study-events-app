@@ -4,8 +4,11 @@ using WebApi.Services;
 
 namespace WebApi.Tests;
 
-public class EventSeatTests
+public class EventSeatTests : IDisposable
 {
+    private readonly TestDatabase _database = new();
+    public void Dispose() => _database.Dispose();
+
     private static Event CreateEvent(int totalSeats) => Event.Create(
         "Test Event", null, new DateTime(2026, 12, 1, 10, 0, 0),
         new DateTime(2026, 12, 1, 11, 0, 0), totalSeats);
@@ -34,9 +37,9 @@ public class EventSeatTests
     }
 
     [Fact]
-    public void Update_ShouldPreserveSeatCounts()
+    public async Task Update_ShouldPreserveSeatCounts()
     {
-        var service = new EventService();
+        var service = _database.CreateEventService();
         var request = new CreateEventRequest
         {
             Title = "Test Event",
@@ -44,11 +47,11 @@ public class EventSeatTests
             EndAt = new DateTime(2026, 12, 1, 11, 0, 0),
             TotalSeats = 3
         };
-        var eventId = service.Create(request).Id;
-        Assert.True(service.TryReserveSeat(eventId));
-        Assert.True(service.TryReserveSeat(eventId));
+        var eventId = (await service.CreateAsync(request)).Id;
+        Assert.True(await service.TryReserveSeatAsync(eventId));
+        Assert.True(await service.TryReserveSeatAsync(eventId));
 
-        var updated = service.Update(eventId, new EventRequest
+        var updated = await service.UpdateAsync(eventId, new EventRequest
         {
             Title = "Updated Event",
             StartAt = request.StartAt,
@@ -58,7 +61,7 @@ public class EventSeatTests
         Assert.Equal("Updated Event", updated.Title);
         Assert.Equal(3, updated.TotalSeats);
         Assert.Equal(1, updated.AvailableSeats);
-        Assert.Equal(3, service.GetById(eventId).TotalSeats);
+        Assert.Equal(3, (await service.GetByIdAsync(eventId)).TotalSeats);
     }
 
     [Fact]

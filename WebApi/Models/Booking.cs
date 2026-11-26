@@ -5,6 +5,10 @@ namespace WebApi.Models;
 /// </summary>
 public class Booking
 {
+    private Booking()
+    {
+    }
+
     /// <summary>
     /// Идентификатор брони. Генерируется на сервере.
     /// </summary>
@@ -14,6 +18,9 @@ public class Booking
     /// Идентификатор события, к которому относится бронь.
     /// </summary>
     public Guid EventId { get; init; }
+
+    /// <summary>Событие, к которому относится бронь.</summary>
+    public Event Event { get; set; } = null!;
 
     /// <summary>
     /// Текущий статус брони.
@@ -30,6 +37,16 @@ public class Booking
     /// </summary>
     public DateTime ProcessedAt { get; init; }
 
+    internal static Booking Create(Event @event) => new()
+    {
+        Id = Guid.NewGuid(),
+        EventId = @event.Id,
+        Event = @event,
+        BookingStatus = BookingStatus.Pending,
+        CreatedAt = DateTime.UtcNow,
+        ProcessedAt = DateTime.MinValue
+    };
+
     internal Booking Confirm() => WithStatus(BookingStatus.Confirmed);
 
     internal Booking Reject() => WithStatus(BookingStatus.Rejected);
@@ -38,6 +55,7 @@ public class Booking
     {
         Id = Id,
         EventId = EventId,
+        Event = Event,
         BookingStatus = status,
         CreatedAt = CreatedAt,
         ProcessedAt = DateTime.UtcNow
