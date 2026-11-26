@@ -1,5 +1,5 @@
-using Microsoft.EntityFrameworkCore;
 using WebApi.DataAccess;
+using WebApi.DataAccess.Repositories;
 using WebApi.Models;
 
 namespace WebApi.Services;
@@ -28,13 +28,11 @@ public sealed class BookingProcessingBackgroundService : BackgroundService
             {
                 try
                 {
-                    List<Guid> pendingIds;
+                    IReadOnlyCollection<Guid> pendingIds;
                     await using (var scope = _scopeFactory.CreateAsyncScope())
                     {
-                        var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-                        pendingIds = await context.Bookings.AsNoTracking()
-                            .Where(b => b.BookingStatus == BookingStatus.Pending)
-                            .Select(b => b.Id).ToListAsync(stoppingToken);
+                        var bookings = scope.ServiceProvider.GetRequiredService<IBookingRepository>();
+                        pendingIds = await bookings.GetPendingIdsAsync(stoppingToken);
                     }
 
                     await Task.WhenAll(pendingIds.Select(id => ProcessBookingAsync(id, stoppingToken)));
@@ -63,16 +61,17 @@ public sealed class BookingProcessingBackgroundService : BackgroundService
         try
         {
             await using var scope = _scopeFactory.CreateAsyncScope();
-            var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-            var booking = await context.Bookings.FindAsync([bookingId], stoppingToken);
+            var bookings = scope.ServiceProvider.GetRequiredService<IBookingRepository>();
+            var events = scope.ServiceProvider.GetRequiredService<IEventRepository>();
+            var booking = await bookings.GetByIdAsync(bookingId, stoppingToken);
             if (booking is null || booking.BookingStatus != BookingStatus.Pending)
             {
                 return;
             }
 
-            var eventExists = await context.Events.AnyAsync(e => e.Id == booking.EventId, stoppingToken);
-            context.Entry(booking).CurrentValues.SetValues(eventExists ? booking.Confirm() : booking.Reject());
-            await context.SaveChangesAsync(stoppingToken);
+            var @event = await events.GetByIdAsync(booking.EventId, stoppingToken);
+            bookings.Update(@event is not null ? booking.Confirm() : booking.Reject());
+            await bookings.SaveChangesAsync(stoppingToken);
             _logger.LogInformation("Бронь {BookingId} обработана: {Status}.", bookingId, booking.BookingStatus);
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
@@ -90,14 +89,15 @@ public sealed class BookingProcessingBackgroundService : BackgroundService
                 {
                     // После ошибки используем новый контекст без несохранённых изменений.
                     await using var scope = _scopeFactory.CreateAsyncScope();
-                    var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-                    var booking = await context.Bookings.FindAsync([bookingId], stoppingToken);
+                    var bookings = scope.ServiceProvider.GetRequiredService<IBookingRepository>();
+                    var events = scope.ServiceProvider.GetRequiredService<IEventRepository>();
+                    var booking = await bookings.GetByIdAsync(bookingId, stoppingToken);
                     if (booking is not null && booking.BookingStatus == BookingStatus.Pending)
                     {
-                        context.Entry(booking).CurrentValues.SetValues(booking.Reject());
-                        var @event = await context.Events.FindAsync([booking.EventId], stoppingToken);
+                        bookings.Update(booking.Reject());
+                        var @event = await events.GetByIdAsync(booking.EventId, stoppingToken);
                         @event?.ReleaseSeats();
-                        await context.SaveChangesAsync(stoppingToken);
+                        await bookings.SaveChangesAsync(stoppingToken);
                         _logger.LogWarning("Бронь {BookingId} отклонена после ошибки.", bookingId);
                     }
                 }

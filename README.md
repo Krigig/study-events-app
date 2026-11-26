@@ -2,17 +2,35 @@
 
 Учебный REST API для управления событиями на **ASP.NET Core Web API (.NET 9)**.
 
-События и брони хранятся в памяти приложения (`InMemoryEventStore` и
-`InMemoryBookingStore`).
-Бизнес-логика вынесена в сервисы `EventService` и `BookingService`, подключённые
-через DI-контейнер.
+События и брони хранятся в PostgreSQL. Схемой управляют миграции EF Core:
+при запуске приложение вызывает `Database.Migrate()`. Бизнес-логика находится
+в `EventService` и `BookingService`, доступ к данным — в `EventRepository`
+и `BookingRepository`. Контекст, репозитории и сервисы зарегистрированы как scoped.
 
 ## Запуск
 
-Требуется [.NET SDK 9](https://dotnet.microsoft.com/download/dotnet/9.0).
+Требуются [.NET SDK 9](https://dotnet.microsoft.com/download/dotnet/9.0)
+и Docker с Linux-контейнерами.
+
+При первом запуске создайте локальный PostgreSQL (если он уже работает,
+повторно создавать контейнер не нужно):
+
+```bash
+docker run -d --name eventapi-postgres --restart unless-stopped -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=eventapi -p 5432:5432 -v eventapi_pgdata:/var/lib/postgresql/data postgres:16-alpine
+```
+
+Строка `ConnectionStrings:DefaultConnection` в `WebApi/appsettings.json`:
+
+```text
+Host=localhost;Port=5432;Database=eventapi;Username=postgres;Password=postgres
+```
+
+Её можно переопределить переменной окружения `ConnectionStrings__DefaultConnection`.
 
 ```bash
 # из корня репозитория
+dotnet tool restore
+dotnet build WebApi/WebApi.sln
 dotnet run --project WebApi
 
 # или из папки WebApi
@@ -26,6 +44,45 @@ dotnet run
 - Базовый URL API: <http://localhost:5194>
 
 > При запуске с профилем https адрес будет <https://localhost:7274>.
+
+## Миграции EF Core
+
+Начальная миграция `InitialCreate` создаёт таблицы `events`, `bookings`,
+первичные ключи, индекс `bookings.event_id` и внешний ключ
+`bookings.event_id → events.id` с `ON DELETE CASCADE`. Столбцы именуются в `snake_case`.
+Миграции находятся в `WebApi/DataAccess/Migrations` и хранятся в Git.
+
+Из корня репозитория:
+
+```bash
+# Восстановить локальный dotnet-ef той же версии, что EF Core
+dotnet tool restore
+
+# После изменения модели создать следующую миграцию (InitialCreate уже включена)
+dotnet ef migrations add DescribeYourChange --project WebApi --startup-project WebApi --output-dir DataAccess/Migrations
+
+# Применить миграции вручную, без запуска API
+dotnet ef database update --project WebApi --startup-project WebApi
+
+# Показать миграции
+dotnet ef migrations list --project WebApi --startup-project WebApi
+```
+
+Обычный `dotnet run --project WebApi` также применяет миграции автоматически
+до запуска фонового сервиса и обработки HTTP-запросов. При повторном запуске
+уже применённые миграции не выполняются повторно.
+
+База спринта 5, созданная через `EnsureCreated()`, не содержит истории миграций.
+Для перехода на спринт 6 остановите API и удалите именно учебную базу `eventapi`
+(все данные в ней будут потеряны):
+
+```bash
+docker exec eventapi-postgres dropdb -U postgres --if-exists --force eventapi
+dotnet run --project WebApi
+```
+
+Приложение создаст базу и схему миграциями. `EnsureCreated()` не используется.
+Даты в запросах передавайте в UTC, например `2026-12-01T10:00:00Z`.
 
 ## Модель события
 
@@ -89,7 +146,7 @@ dotnet run
 
 ```json
 {
-  "items": [ { "id": "6f9619ff-8b86-d011-b42d-00cf4fc964ff", "title": "Встреча команды", "description": "Еженедельный синк", "startAt": "2026-09-01T10:00:00", "endAt": "2026-09-01T11:00:00", "totalSeats": 30, "availableSeats": 30 } ],
+  "items": [ { "id": "6f9619ff-8b86-d011-b42d-00cf4fc964ff", "title": "Встреча команды", "description": "Еженедельный синк", "startAt": "2026-09-01T10:00:00Z", "endAt": "2026-09-01T11:00:00Z", "totalSeats": 30, "availableSeats": 30 } ],
   "page": 1,
   "pageSize": 10,
   "totalItems": 1,
@@ -104,7 +161,7 @@ dotnet run
 curl "http://localhost:5194/events?title=встреча"
 
 # События в диапазоне дат, вторая страница по 5 элементов
-curl "http://localhost:5194/events?from=2026-09-01T00:00:00&to=2026-09-30T23:59:59&page=2&pageSize=5"
+curl "http://localhost:5194/events?from=2026-09-01T00:00:00Z&to=2026-09-30T23:59:59Z&page=2&pageSize=5"
 
 # Комбинированный фильтр: название И диапазон дат
 curl "http://localhost:5194/events?title=лекция&from=2026-09-01&to=2026-10-01"
@@ -120,8 +177,8 @@ curl -X POST http://localhost:5194/events \
   -d '{
     "title": "Встреча команды",
     "description": "Еженедельный синк",
-    "startAt": "2026-09-01T10:00:00",
-    "endAt": "2026-09-01T11:00:00",
+    "startAt": "2026-09-01T10:00:00Z",
+    "endAt": "2026-09-01T11:00:00Z",
     "totalSeats": 30
   }'
 ```
@@ -134,8 +191,8 @@ curl -X POST http://localhost:5194/events \
   "id": "6f9619ff-8b86-d011-b42d-00cf4fc964ff",
   "title": "Встреча команды",
   "description": "Еженедельный синк",
-  "startAt": "2026-09-01T10:00:00",
-  "endAt": "2026-09-01T11:00:00",
+  "startAt": "2026-09-01T10:00:00Z",
+  "endAt": "2026-09-01T11:00:00Z",
   "totalSeats": 30,
   "availableSeats": 30
 }
@@ -150,27 +207,31 @@ curl -X POST http://localhost:5194/events \
 и сообщением `No available seats for this event`. Резервирование места и
 создание брони выполняются в одной критической секции.
 
-`BookingService` использует `lock (_bookingLock)`: внутри него сервис получает
-событие, резервирует место, сохраняет событие и создаёт бронь. Если сохранить
-бронь не удалось, место освобождается. В `Event`
-отдельный `lock` защищает счётчик мест от одновременного изменения. Брони
-хранятся в `ConcurrentDictionary<Guid, Booking>`, поэтому чтение по Id и снимок
-ожидающих броней безопасны при параллельных запросах. Хранилище событий
-синхронизирует доступ к коллекции и сохраняет порядок создания для пагинации.
+`BookingService` использует общий статический `SemaphoreSlim`: внутри него
+сервис получает событие через репозиторий, резервирует место и добавляет бронь.
+Оба репозитория одного scope используют один `AppDbContext`, поэтому один
+`SaveChangesAsync()` атомарно сохраняет бронь и изменение числа мест.
+При ошибке сохранения изменения откатываются PostgreSQL, а неудавшиеся
+изменения удаляются из change tracker. Семафор синхронизирует запросы одного
+процесса приложения; для нескольких экземпляров API нужна синхронизация в БД.
+Список событий сортируется по дате начала, названию и id до пагинации.
 
 Фоновый сервис запускает обработку пакета через `Task.WhenAll`. Двухсекундная
-задержка каждой брони проходит параллельно; `SemaphoreSlim(1, 1)` защищает
-проверку события и смену статуса после задержки. Семафор допускает асинхронное
-ожидание через `WaitAsync`.
+задержка каждой брони проходит параллельно. `IServiceScopeFactory` создаёт
+scope для чтения Pending-id и отдельный scope с репозиториями для каждой задачи.
+Обычное подтверждение выполняется параллельно; общий семафор используется
+только при возврате места после ошибки.
 
 Зарегистрированный через `AddHostedService` фоновый сервис:
 
 1. получает снимок броней в статусе `Pending`;
 2. запускает их обработку параллельно: каждая бронь ждёт две секунды, имитируя обращение к внешней системе;
-3. под семафором проверяет существование события, переводит бронь в `Confirmed` и записывает текущее UTC-время в `ProcessedAt`;
-4. если событие удалено, переводит бронь в `Rejected`; при непредвиденной ошибке также отклоняет бронь, возвращает место существующему событию и сохраняет его.
+3. проверяет существование события, переводит бронь в `Confirmed` и записывает текущее UTC-время в `ProcessedAt`;
+4. при непредвиденной ошибке открывает новый scope, отклоняет ещё ожидающую бронь и возвращает место существующему событию одним сохранением.
 
-После перезапуска приложения данные событий и броней теряются.
+Удаление события каскадно удаляет его брони в PostgreSQL. Если при обработке
+обнаружена бронь без события, она отклоняется. Данные сохраняются между
+перезапусками приложения и при пересоздании контейнера с тем же Docker-томом.
 
 ### Пример сценария бронирования
 
@@ -254,8 +315,8 @@ curl -X PUT http://localhost:5194/events/6f9619ff-8b86-d011-b42d-00cf4fc964ff \
   -d '{
     "title": "Встреча команды (обновлено)",
     "description": null,
-    "startAt": "2026-09-01T10:00:00",
-    "endAt": "2026-09-01T12:00:00"
+    "startAt": "2026-09-01T10:00:00Z",
+    "endAt": "2026-09-01T12:00:00Z"
   }'
 ```
 
@@ -273,7 +334,7 @@ curl -X PUT http://localhost:5194/events/6f9619ff-8b86-d011-b42d-00cf4fc964ff \
 Пример — пустой `title`:
 
 ```json
-{ "title": "", "startAt": "2026-09-01T12:00:00", "endAt": "2026-09-01T13:00:00", "totalSeats": 30 }
+{ "title": "", "startAt": "2026-09-01T12:00:00Z", "endAt": "2026-09-01T13:00:00Z", "totalSeats": 30 }
 ```
 
 Ответ:
@@ -291,7 +352,7 @@ curl -X PUT http://localhost:5194/events/6f9619ff-8b86-d011-b42d-00cf4fc964ff \
 Пример — `endAt` раньше `startAt`:
 
 ```json
-{ "title": "Лекция", "startAt": "2026-09-01T12:00:00", "endAt": "2026-09-01T11:00:00", "totalSeats": 30 }
+{ "title": "Лекция", "startAt": "2026-09-01T12:00:00Z", "endAt": "2026-09-01T11:00:00Z", "totalSeats": 30 }
 ```
 
 Ответ:
@@ -330,13 +391,30 @@ curl -X PUT http://localhost:5194/events/6f9619ff-8b86-d011-b42d-00cf4fc964ff \
 
 ## Тесты
 
-Юнит-тесты на **xUnit** покрывают CRUD событий, фильтрацию, пагинацию,
-валидацию запросов события, создание и получение броней, уникальность их
-идентификаторов и изменение статуса:
+Юнит-тесты на **xUnit** используют EF Core InMemory и покрывают сервисы,
+валидацию, конкурентное бронирование, фоновую обработку и отмену.
+
+`WebApi.IntegrationTests` проверяет все методы обоих репозиториев на реальном
+PostgreSQL через `Testcontainers.PostgreSql`: CRUD, все сочетания фильтров,
+пагинацию, строковый статус, ограничения, каскадное удаление, атомарность
+сохранения и конкурентные запросы через разные scopes.
+
+**Перед запуском интеграционных тестов должен работать Docker.** Testcontainers
+автоматически создаёт один PostgreSQL-контейнер на всю коллекцию тестов и удаляет
+его после завершения. Connection string берётся из контейнера, порт назначается
+динамически. Тесты коллекции последовательны; перед каждым тестом выполняются
+`EnsureDeletedAsync()` и `MigrateAsync()`. Локальная база `eventapi` не затрагивается.
 
 ```bash
 # из корня репозитория
+# Все тесты, включая интеграционные (Docker обязателен)
+dotnet test WebApi/WebApi.sln
+
+# Только юнит-тесты (Docker не нужен)
 dotnet test WebApi.Tests/WebApi.Tests.csproj
+
+# Только интеграционные тесты (Docker обязателен)
+dotnet test WebApi.IntegrationTests/WebApi.IntegrationTests.csproj
 ```
 
 ## Структура проекта
@@ -346,11 +424,14 @@ WebApi/
 ├── Controllers/                    # Эндпоинты событий и броней
 ├── Services/
 │   ├── EventService.cs             # Бизнес-логика событий
-│   ├── InMemoryEventStore.cs        # Хранилище событий с порядком создания
 │   ├── BookingService.cs           # Логика создания и подтверждения броней
-│   ├── InMemoryBookingStore.cs      # Потокобезопасное хранилище броней
 │   └── BookingProcessingBackgroundService.cs # Параллельная обработка броней
 ├── Interfaces/                     # Контракты сервисов
+├── DataAccess/
+│   ├── AppDbContext.cs             # Контекст EF Core
+│   ├── Configurations/             # Fluent API
+│   ├── Repositories/               # Интерфейсы и реализации репозиториев
+│   └── Migrations/                 # InitialCreate и snapshot модели
 ├── Middleware/GlobalExceptionHandlingMiddleware.cs  # Глобальная обработка ошибок
 ├── Exceptions/NotFoundException.cs # 404 при отсутствии ресурса
 └── Models/                         # Доменная модель и DTO
@@ -362,4 +443,6 @@ WebApi/
     └── PaginatedResult.cs          # Обёртка пагинации
 
 WebApi.Tests/                       # Юнит-тесты (xUnit)
+WebApi.IntegrationTests/            # Репозитории + PostgreSQL Testcontainers
+dotnet-tools.json                   # Локальный dotnet-ef 9
 ```

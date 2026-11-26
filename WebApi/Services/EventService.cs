@@ -1,5 +1,5 @@
-using Microsoft.EntityFrameworkCore;
 using WebApi.DataAccess;
+using WebApi.DataAccess.Repositories;
 using WebApi.Exceptions;
 using WebApi.Interfaces;
 using WebApi.Models;
@@ -9,49 +9,30 @@ namespace WebApi.Services;
 /// <summary>Сервис для работы с событиями.</summary>
 internal sealed class EventService : IEventService
 {
-    private readonly AppDbContext _context;
+    private readonly IEventRepository _events;
 
-    public EventService(AppDbContext context)
+    public EventService(IEventRepository events)
     {
-        _context = context;
+        _events = events;
     }
 
     public async Task<PaginatedResult<EventResponse>> GetAllAsync(
         string? title, DateTime? from, DateTime? to, int page = 1, int pageSize = 10)
     {
-        var query = _context.Events.AsNoTracking();
-        if (!string.IsNullOrWhiteSpace(title))
-        {
-            var normalizedTitle = title.ToLower();
-            query = query.Where(e => e.Title.ToLower().Contains(normalizedTitle));
-        }
-
-        if (from.HasValue)
-        {
-            query = query.Where(e => e.StartAt >= from.Value);
-        }
-
-        if (to.HasValue)
-        {
-            query = query.Where(e => e.EndAt <= to.Value);
-        }
-
-        var totalItems = await query.CountAsync();
-        var events = await query.OrderBy(e => e.StartAt).ThenBy(e => e.Title).ThenBy(e => e.Id)
-            .Skip((page - 1) * pageSize).Take(pageSize).ToListAsync();
+        var result = await _events.GetAllAsync(title, from, to, page, pageSize);
         return new PaginatedResult<EventResponse>
         {
-            Items = events.Select(ToResponse).ToList(),
-            Page = page,
-            PageSize = pageSize,
-            TotalItems = totalItems,
-            TotalPages = (int)Math.Ceiling(totalItems / (double)pageSize)
+            Items = result.Items.Select(ToResponse).ToList(),
+            Page = result.Page,
+            PageSize = result.PageSize,
+            TotalItems = result.TotalItems,
+            TotalPages = result.TotalPages
         };
     }
 
     public async Task<EventResponse> GetByIdAsync(Guid id)
     {
-        var @event = await _context.Events.AsNoTracking().SingleOrDefaultAsync(e => e.Id == id)
+        var @event = await _events.GetByIdAsync(id)
             ?? throw new NotFoundException($"Событие с id = {id} не найдено.");
         return ToResponse(@event);
     }
@@ -67,7 +48,7 @@ internal sealed class EventService : IEventService
                 return false;
             }
 
-            await _context.SaveChangesAsync();
+            await _events.SaveChangesAsync();
             return true;
         }
         finally
@@ -83,7 +64,7 @@ internal sealed class EventService : IEventService
         {
             var @event = await FindForUpdateAsync(id);
             @event.ReleaseSeats();
-            await _context.SaveChangesAsync();
+            await _events.SaveChangesAsync();
         }
         finally
         {
@@ -95,8 +76,8 @@ internal sealed class EventService : IEventService
     {
         var @event = Event.Create(request.Title, request.Description,
             request.StartAt!.Value, request.EndAt!.Value, request.TotalSeats!.Value);
-        _context.Events.Add(@event);
-        await _context.SaveChangesAsync();
+        _events.Add(@event);
+        await _events.SaveChangesAsync();
         return ToResponse(@event);
     }
 
@@ -110,7 +91,8 @@ internal sealed class EventService : IEventService
             @event.Description = request.Description;
             @event.StartAt = request.StartAt!.Value;
             @event.EndAt = request.EndAt!.Value;
-            await _context.SaveChangesAsync();
+            _events.Update(@event);
+            await _events.SaveChangesAsync();
             return ToResponse(@event);
         }
         finally
@@ -125,8 +107,8 @@ internal sealed class EventService : IEventService
         try
         {
             var @event = await FindForUpdateAsync(id);
-            _context.Events.Remove(@event);
-            await _context.SaveChangesAsync();
+            _events.Remove(@event);
+            await _events.SaveChangesAsync();
         }
         finally
         {
@@ -134,17 +116,9 @@ internal sealed class EventService : IEventService
         }
     }
 
-    private async Task<Event> FindForUpdateAsync(Guid id)
-    {
-        var tracked = _context.Events.Local.FirstOrDefault(e => e.Id == id);
-        if (tracked is not null)
-        {
-            await _context.Entry(tracked).ReloadAsync();
-        }
-
-        return await _context.Events.FindAsync(id)
+    private async Task<Event> FindForUpdateAsync(Guid id) =>
+        await _events.GetByIdAsync(id)
             ?? throw new NotFoundException($"Событие с id = {id} не найдено.");
-    }
 
     private static EventResponse ToResponse(Event @event) => new()
     {

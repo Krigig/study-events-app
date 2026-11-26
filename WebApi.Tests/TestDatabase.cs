@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 using WebApi.DataAccess;
+using WebApi.DataAccess.Repositories;
 using WebApi.Interfaces;
 using WebApi.Models;
 using WebApi.Services;
@@ -28,6 +29,8 @@ internal sealed class TestDatabase : IDisposable
         });
         services.AddScoped<IEventService, EventService>();
         services.AddScoped<IBookingService, BookingService>();
+        services.AddScoped<IEventRepository, EventRepository>();
+        services.AddScoped<IBookingRepository, BookingRepository>();
         _provider = services.BuildServiceProvider(new ServiceProviderOptions
         {
             ValidateScopes = true,

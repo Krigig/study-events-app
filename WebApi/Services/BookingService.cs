@@ -1,5 +1,5 @@
-using Microsoft.EntityFrameworkCore;
 using WebApi.DataAccess;
+using WebApi.DataAccess.Repositories;
 using WebApi.Exceptions;
 using WebApi.Interfaces;
 using WebApi.Models;
@@ -9,11 +9,13 @@ namespace WebApi.Services;
 /// <summary>Сервис для работы с бронями.</summary>
 internal sealed class BookingService : IBookingService
 {
-    private readonly AppDbContext _context;
+    private readonly IEventRepository _events;
+    private readonly IBookingRepository _bookings;
 
-    public BookingService(AppDbContext context)
+    public BookingService(IEventRepository events, IBookingRepository bookings)
     {
-        _context = context;
+        _events = events;
+        _bookings = bookings;
     }
 
     public async Task<BookingResponse> CreateBookingAsync(Guid eventId)
@@ -21,13 +23,7 @@ internal sealed class BookingService : IBookingService
         await DataAccessSynchronization.WriteSemaphore.WaitAsync();
         try
         {
-            var tracked = _context.Events.Local.FirstOrDefault(e => e.Id == eventId);
-            if (tracked is not null)
-            {
-                await _context.Entry(tracked).ReloadAsync();
-            }
-
-            var @event = await _context.Events.FindAsync(eventId)
+            var @event = await _events.GetByIdAsync(eventId)
                 ?? throw new NotFoundException($"Событие с id = {eventId} не найдено.");
             if (!@event.TryReserveSeats())
             {
@@ -37,14 +33,13 @@ internal sealed class BookingService : IBookingService
             var booking = Booking.Create(@event);
             try
             {
-                _context.Bookings.Add(booking);
+                _bookings.Add(booking);
                 // Бронь и изменение числа мест сохраняются одной транзакцией.
-                await _context.SaveChangesAsync();
+                await _bookings.SaveChangesAsync();
                 return ToResponse(booking);
             }
             catch
             {
-                _context.Entry(booking).State = EntityState.Detached;
                 @event.Bookings.Remove(booking);
                 @event.ReleaseSeats();
                 throw;
@@ -58,15 +53,14 @@ internal sealed class BookingService : IBookingService
 
     public async Task<BookingResponse> GetBookingByIdAsync(Guid bookingId)
     {
-        var booking = await _context.Bookings.AsNoTracking().SingleOrDefaultAsync(b => b.Id == bookingId)
+        var booking = await _bookings.GetByIdAsync(bookingId)
             ?? throw new NotFoundException($"Бронь с id = {bookingId} не найдена.");
         return ToResponse(booking);
     }
 
     public async Task<IReadOnlyCollection<BookingResponse>> GetPendingBookingsAsync()
     {
-        var bookings = await _context.Bookings.AsNoTracking()
-            .Where(b => b.BookingStatus == BookingStatus.Pending).ToListAsync();
+        var bookings = await _bookings.GetPendingAsync();
         return bookings.Select(ToResponse).ToArray();
     }
 
@@ -75,21 +69,15 @@ internal sealed class BookingService : IBookingService
         await DataAccessSynchronization.WriteSemaphore.WaitAsync();
         try
         {
-            var tracked = _context.Bookings.Local.FirstOrDefault(b => b.Id == bookingId);
-            if (tracked is not null)
-            {
-                await _context.Entry(tracked).ReloadAsync();
-            }
-
-            var booking = await _context.Bookings.FindAsync(bookingId)
+            var booking = await _bookings.GetByIdAsync(bookingId)
                 ?? throw new NotFoundException($"Бронь с id = {bookingId} не найдена.");
             if (booking.BookingStatus != BookingStatus.Pending)
             {
                 return;
             }
 
-            _context.Entry(booking).CurrentValues.SetValues(booking.Confirm());
-            await _context.SaveChangesAsync();
+            _bookings.Update(booking.Confirm());
+            await _bookings.SaveChangesAsync();
         }
         finally
         {
